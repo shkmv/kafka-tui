@@ -156,6 +156,7 @@ pub fn screen_key_binding(screen: &Screen, key: KeyEvent, sidebar_focused: bool)
         Screen::Welcome => match key.code {
             KeyCode::Enter => Some(Action::Select),
             KeyCode::Char('n') => Some(Action::ShowModal(ModalType::ConnectionForm(Default::default()))),
+            KeyCode::Char('d') => Some(Action::RequestDeleteConnection),
             _ => None,
         },
         Screen::Topics => match (key.modifiers, key.code) {
@@ -212,7 +213,7 @@ pub fn screen_key_binding(screen: &Screen, key: KeyEvent, sidebar_focused: bool)
 pub fn get_help_text(screen: &Screen) -> Vec<(&'static str, &'static str)> {
     let mut h = vec![("q/Ctrl+C", "Quit"), ("?", "Help"), ("Tab", "Switch panel"), ("Esc", "Back"), ("1-3", "Navigate")];
     h.extend(match screen {
-        Screen::Welcome => vec![("Enter", "Connect"), ("n", "New")],
+        Screen::Welcome => vec![("Enter", "Connect"), ("n", "New"), ("d", "Delete")],
         Screen::Topics => vec![("j/k", "Navigate"), ("Enter", "Messages"), ("n", "New"), ("/", "Filter"), ("Ctrl+R", "Refresh")],
         Screen::Messages { .. } => vec![("j/k", "Navigate"), ("v", "Detail"), ("p", "Produce"), ("Ctrl+R", "Refresh")],
         Screen::ConsumerGroups => vec![("j/k", "Navigate"), ("Enter", "Details"), ("/", "Filter"), ("Ctrl+R", "Refresh")],

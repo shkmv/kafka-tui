@@ -15,7 +15,7 @@ impl StatusBar {
             .direction(Direction::Horizontal)
             .constraints([
                 Constraint::Min(40),      // Key hints
-                Constraint::Length(30),   // Connection info
+                Constraint::Length(40),   // Connection info
             ])
             .split(area);
 
@@ -36,22 +36,23 @@ impl StatusBar {
         let hints_paragraph = Paragraph::new(hints_line);
         frame.render_widget(hints_paragraph, chunks[0]);
 
-        // Connection info
-        let conn_info = if let Some(ref profile) = state.connection.active_profile {
-            profile.brokers.clone()
+        // Connection indicator
+        let conn_line = if let Some(ref profile) = state.connection.active_profile {
+            Line::from(vec![
+                Span::styled("● ", THEME.status_connected()),
+                Span::styled(&profile.name, THEME.normal_style()),
+                Span::styled(" (", THEME.muted_style()),
+                Span::styled(&profile.brokers, THEME.muted_style()),
+                Span::styled(")", THEME.muted_style()),
+            ])
         } else {
-            "Not connected".to_string()
+            Line::from(vec![
+                Span::styled("○ ", THEME.status_disconnected()),
+                Span::styled("Not connected", THEME.status_disconnected()),
+            ])
         };
 
-        let conn_style = if state.connection.active_profile.is_some() {
-            THEME.muted_style()
-        } else {
-            THEME.status_disconnected()
-        };
-
-        let conn_paragraph = Paragraph::new(conn_info)
-            .style(conn_style)
-            .alignment(Alignment::Right);
+        let conn_paragraph = Paragraph::new(conn_line).alignment(Alignment::Right);
         frame.render_widget(conn_paragraph, chunks[1]);
     }
 

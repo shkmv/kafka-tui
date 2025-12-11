@@ -29,7 +29,9 @@ pub enum Action {
     LoadSavedConnections,
     ConnectionsLoaded(Vec<ConnectionProfile>),
     SaveConnection(ConnectionProfile),
+    RequestDeleteConnection,
     DeleteConnection(uuid::Uuid),
+    ConnectionDeleted(uuid::Uuid),
 
     // === Topic Actions ===
     FetchTopics,

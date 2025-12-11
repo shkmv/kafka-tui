@@ -85,7 +85,27 @@ pub fn update(state: &mut AppState, action: Action) -> Command {
         Action::LoadSavedConnections => Command::LoadConnectionProfiles,
         Action::ConnectionsLoaded(p) => { state.connection.available_profiles = p; Command::None }
         Action::SaveConnection(p) => Command::SaveConnectionProfile(p),
+
+        Action::RequestDeleteConnection => {
+            if let Some(profile) = state.connection.available_profiles.get(state.connection.selected_index).cloned() {
+                update(state, Action::ShowModal(ModalType::Confirm {
+                    title: "Delete Connection".into(),
+                    message: format!("Delete connection '{}'?", profile.name),
+                    action: ConfirmAction::DeleteConnection(profile.id),
+                }))
+            } else { Command::None }
+        }
+
         Action::DeleteConnection(id) => Command::DeleteConnectionProfile(id),
+
+        Action::ConnectionDeleted(id) => {
+            state.connection.available_profiles.retain(|p| p.id != id);
+            if state.connection.selected_index >= state.connection.available_profiles.len() {
+                state.connection.selected_index = state.connection.available_profiles.len().saturating_sub(1);
+            }
+            toast(state, "Connection deleted", ToastLevel::Success);
+            Command::None
+        }
 
         // Topics
         Action::FetchTopics => { state.topics_state.loading = true; Command::FetchTopicList }
@@ -321,6 +341,7 @@ fn handle_modal_confirm(state: &mut AppState) -> Command {
     match modal {
         ModalType::Confirm { action, .. } => match action {
             ConfirmAction::DeleteTopic(n) => Command::DeleteKafkaTopic(n),
+            ConfirmAction::DeleteConnection(id) => Command::DeleteConnectionProfile(id),
             ConfirmAction::DisconnectCluster => Command::DisconnectFromKafka,
         },
         ModalType::Input { action, value, .. } => match action {

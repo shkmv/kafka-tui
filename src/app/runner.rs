@@ -62,22 +62,16 @@ impl App {
             }
 
             Command::ConnectToKafka(profile) => {
-                let tx = self.tx.clone();
                 let config = KafkaConfig::from(profile);
-                let config2 = KafkaConfig::from(self.state.connection.active_profile.clone().unwrap());
-
-                tokio::spawn(async move {
-                    match KafkaClient::new(config).await {
-                        Ok(c) => match c.test_connection().await {
-                            Ok(_) => { tx.send(Action::ConnectionSuccess).ok(); }
-                            Err(e) => { tx.send(Action::ConnectionFailed(e.to_string())).ok(); }
-                        },
-                        Err(e) => { tx.send(Action::ConnectionFailed(e.to_string())).ok(); }
-                    }
-                });
-
-                if let Ok(c) = KafkaClient::new(config2).await {
-                    self.client = Some(c);
+                match KafkaClient::new(config).await {
+                    Ok(c) => match c.test_connection().await {
+                        Ok(_) => {
+                            self.client = Some(c);
+                            self.tx.send(Action::ConnectionSuccess).ok();
+                        }
+                        Err(e) => { self.tx.send(Action::ConnectionFailed(e.to_string())).ok(); }
+                    },
+                    Err(e) => { self.tx.send(Action::ConnectionFailed(e.to_string())).ok(); }
                 }
             }
 
@@ -162,8 +156,9 @@ impl App {
             }
 
             Command::DeleteConnectionProfile(id) => {
-                if let Err(e) = connections::delete_connection(id) {
-                    self.tx.send(Action::ShowToast { message: e.to_string(), level: ToastLevel::Error }).ok();
+                match connections::delete_connection(id) {
+                    Ok(_) => { self.tx.send(Action::ConnectionDeleted(id)).ok(); }
+                    Err(e) => { self.tx.send(Action::ShowToast { message: e.to_string(), level: ToastLevel::Error }).ok(); }
                 }
             }
 
@@ -176,10 +171,18 @@ impl App {
         F: FnOnce(Arc<KafkaClient>, mpsc::UnboundedSender<Action>) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = ()> + Send,
     {
-        if let Some(c) = &self.client {
-            let client = c.clone();
-            let tx = self.tx.clone();
-            tokio::spawn(async move { f(client, tx).await });
+        match &self.client {
+            Some(c) => {
+                let client = c.clone();
+                let tx = self.tx.clone();
+                tokio::spawn(async move { f(client, tx).await });
+            }
+            None => {
+                self.tx.send(Action::ShowToast {
+                    message: "Not connected to Kafka".into(),
+                    level: ToastLevel::Error,
+                }).ok();
+            }
         }
     }
 }

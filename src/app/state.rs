@@ -440,6 +440,7 @@ pub enum TopicCreateFormField {
 #[derive(Debug, Clone)]
 pub enum ConfirmAction {
     DeleteTopic(String),
+    DeleteConnection(uuid::Uuid),
     DisconnectCluster,
 }
 
