@@ -55,7 +55,11 @@ pub enum Action {
     DeleteTopic(String),
     TopicDeleted(String),
     TopicDeleteFailed(String),
+    RequestViewTopicDetails,
     ViewTopicDetails(String),
+    TopicDetailsFetched(crate::app::state::TopicDetail),
+    TopicDetailsFetchFailed(String),
+    SwitchTopicDetailTab,
     ViewTopicMessages(String),
 
     // === Message Actions ===

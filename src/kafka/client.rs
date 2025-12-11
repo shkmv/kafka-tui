@@ -10,7 +10,7 @@ use rdkafka::message::{Headers, Message};
 use rdkafka::producer::{FutureProducer, FutureRecord, ProducerContext};
 use rdkafka::TopicPartitionList;
 
-use crate::app::state::{ConsumerGroupInfo, KafkaMessage, OffsetMode, TopicInfo};
+use crate::app::state::{ConsumerGroupInfo, KafkaMessage, OffsetMode, PartitionInfo, TopicDetail, TopicInfo};
 use crate::error::{AppError, AppResult};
 use crate::kafka::config::{KafkaConfig, KafkaSaslMechanism, SecurityConfig};
 
@@ -275,6 +275,70 @@ impl KafkaClient {
                 total_lag: 0,
             })
             .collect())
+    }
+
+    pub async fn get_topic_details(&self, topic_name: &str) -> AppResult<TopicDetail> {
+        let metadata = self.consumer
+            .fetch_metadata(Some(topic_name), Duration::from_secs(10))
+            .map_err(|e| AppError::Kafka(format!("Metadata fetch: {}", e)))?;
+
+        let topic_meta = metadata.topics().first()
+            .ok_or_else(|| AppError::Kafka("Topic not found".into()))?;
+
+        let mut partitions = Vec::new();
+        for p in topic_meta.partitions() {
+            let (low, high) = self.consumer
+                .fetch_watermarks(topic_name, p.id(), Duration::from_secs(5))
+                .unwrap_or((0, 0));
+
+            partitions.push(PartitionInfo {
+                id: p.id(),
+                leader: p.leader(),
+                replicas: p.replicas().to_vec(),
+                isr: p.isr().to_vec(),
+                low_watermark: low,
+                high_watermark: high,
+            });
+        }
+
+        partitions.sort_by_key(|p| p.id);
+
+        // Fetch config using admin API
+        let config = self.get_topic_config(topic_name).await.unwrap_or_default();
+
+        Ok(TopicDetail {
+            name: topic_name.to_string(),
+            partitions,
+            config,
+            is_internal: topic_name.starts_with("__"),
+        })
+    }
+
+    async fn get_topic_config(&self, topic_name: &str) -> AppResult<Vec<(String, String)>> {
+        use rdkafka::admin::ResourceSpecifier;
+
+        let opts = AdminOptions::new().operation_timeout(Some(Duration::from_secs(10)));
+        let resource = ResourceSpecifier::Topic(topic_name);
+
+        let results = self.admin.describe_configs([&resource], &opts).await
+            .map_err(|e| AppError::Kafka(format!("Describe config: {}", e)))?;
+
+        let mut config = Vec::new();
+        for result in results {
+            match result {
+                Ok(resource) => {
+                    for entry in resource.entries {
+                        if let Some(value) = entry.value {
+                            config.push((entry.name, value));
+                        }
+                    }
+                }
+                Err(e) => return Err(AppError::Kafka(format!("Config error: {:?}", e))),
+            }
+        }
+
+        config.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(config)
     }
 
     pub fn brokers(&self) -> &str {

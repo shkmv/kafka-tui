@@ -148,6 +148,15 @@ pub struct TopicsState {
     pub loading: bool,
     pub sort_by: TopicSortField,
     pub sort_ascending: bool,
+    pub current_detail: Option<TopicDetail>,
+    pub detail_tab: TopicDetailTab,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum TopicDetailTab {
+    #[default]
+    Partitions,
+    Config,
 }
 
 impl TopicsState {
@@ -176,6 +185,30 @@ pub struct TopicInfo {
     pub replication_factor: i32,
     pub message_count: Option<i64>,
     pub is_internal: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct TopicDetail {
+    pub name: String,
+    pub partitions: Vec<PartitionInfo>,
+    pub config: Vec<(String, String)>,
+    pub is_internal: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct PartitionInfo {
+    pub id: i32,
+    pub leader: i32,
+    pub replicas: Vec<i32>,
+    pub isr: Vec<i32>,
+    pub low_watermark: i64,
+    pub high_watermark: i64,
+}
+
+impl PartitionInfo {
+    pub fn message_count(&self) -> i64 {
+        self.high_watermark - self.low_watermark
+    }
 }
 
 #[derive(Debug, Clone, Default, EnumIter, Display, PartialEq, Eq)]

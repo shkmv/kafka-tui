@@ -166,10 +166,37 @@ pub fn update(state: &mut AppState, action: Action) -> Command {
 
         Action::TopicDeleteFailed(e) => { toast(state, &format!("Failed to delete topic: {}", e), ToastLevel::Error); Command::None }
 
+        Action::RequestViewTopicDetails => {
+            if let Some(topic) = state.topics_state.selected_topic() {
+                let name = topic.name.clone();
+                update(state, Action::ViewTopicDetails(name))
+            } else { Command::None }
+        }
+
         Action::ViewTopicDetails(name) => {
             state.screen_history.push(state.active_screen.clone());
+            state.topics_state.current_detail = None;
+            state.topics_state.detail_tab = TopicDetailTab::default();
             state.active_screen = Screen::TopicDetails { topic_name: name.clone() };
             Command::FetchTopicDetails(name)
+        }
+
+        Action::TopicDetailsFetched(detail) => {
+            state.topics_state.current_detail = Some(detail);
+            Command::None
+        }
+
+        Action::TopicDetailsFetchFailed(e) => {
+            toast(state, &format!("Failed to fetch topic details: {}", e), ToastLevel::Error);
+            Command::None
+        }
+
+        Action::SwitchTopicDetailTab => {
+            state.topics_state.detail_tab = match state.topics_state.detail_tab {
+                TopicDetailTab::Partitions => TopicDetailTab::Config,
+                TopicDetailTab::Config => TopicDetailTab::Partitions,
+            };
+            Command::None
         }
 
         Action::ViewTopicMessages(name) => {

@@ -161,6 +161,7 @@ pub fn screen_key_binding(screen: &Screen, key: KeyEvent, sidebar_focused: bool)
         },
         Screen::Topics => match (key.modifiers, key.code) {
             (KeyModifiers::NONE, KeyCode::Enter | KeyCode::Char('m')) => Some(Action::Select),
+            (KeyModifiers::NONE, KeyCode::Char('i')) => Some(Action::RequestViewTopicDetails),
             (KeyModifiers::NONE, KeyCode::Char('n')) => Some(Action::ShowModal(ModalType::TopicCreateForm(Default::default()))),
             (KeyModifiers::NONE, KeyCode::Char('/')) => Some(Action::ShowModal(ModalType::Input {
                 title: "Filter Topics".into(), placeholder: "Enter filter".into(), value: String::new(), action: InputAction::FilterTopics,
@@ -170,10 +171,14 @@ pub fn screen_key_binding(screen: &Screen, key: KeyEvent, sidebar_focused: bool)
             _ => None,
         },
         Screen::TopicDetails { topic_name } => match key.code {
-            KeyCode::Left | KeyCode::Char('h') => Some(Action::MoveLeft),
-            KeyCode::Right | KeyCode::Char('l') => Some(Action::MoveRight),
+            KeyCode::Tab | KeyCode::Left | KeyCode::Char('h') | KeyCode::Right | KeyCode::Char('l') => Some(Action::SwitchTopicDetailTab),
             KeyCode::Char('m') => Some(Action::ViewTopicMessages(topic_name.clone())),
-            KeyCode::F(5) => Some(Action::FetchTopics),
+            KeyCode::Char('d') => Some(Action::ShowModal(ModalType::Confirm {
+                title: "Delete Topic".into(),
+                message: format!("Delete topic '{}'? This cannot be undone.", topic_name),
+                action: ConfirmAction::DeleteTopic(topic_name.clone()),
+            })),
+            KeyCode::F(5) => Some(Action::ViewTopicDetails(topic_name.clone())),
             _ => None,
         },
         Screen::Messages { topic_name } => match (key.modifiers, key.code) {
@@ -214,10 +219,11 @@ pub fn get_help_text(screen: &Screen) -> Vec<(&'static str, &'static str)> {
     let mut h = vec![("q/Ctrl+C", "Quit"), ("?", "Help"), ("Tab", "Switch panel"), ("Esc", "Back"), ("1-3", "Navigate")];
     h.extend(match screen {
         Screen::Welcome => vec![("Enter", "Connect"), ("n", "New"), ("d", "Delete")],
-        Screen::Topics => vec![("j/k", "Navigate"), ("Enter", "Messages"), ("n", "New"), ("/", "Filter"), ("Ctrl+R", "Refresh")],
+        Screen::Topics => vec![("j/k", "Nav"), ("Enter/m", "Messages"), ("i", "Details"), ("n", "New"), ("/", "Filter")],
         Screen::Messages { .. } => vec![("j/k", "Navigate"), ("v", "Detail"), ("p", "Produce"), ("Ctrl+R", "Refresh")],
         Screen::ConsumerGroups => vec![("j/k", "Navigate"), ("Enter", "Details"), ("/", "Filter"), ("Ctrl+R", "Refresh")],
-        Screen::TopicDetails { .. } | Screen::ConsumerGroupDetails { .. } => vec![("h/l", "Tabs"), ("F5", "Refresh")],
+        Screen::TopicDetails { .. } => vec![("Tab", "Switch"), ("m", "Messages"), ("d", "Delete"), ("F5", "Refresh")],
+        Screen::ConsumerGroupDetails { .. } => vec![("h/l", "Tabs"), ("F5", "Refresh")],
         _ => vec![],
     });
     h

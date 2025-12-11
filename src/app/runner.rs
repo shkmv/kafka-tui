@@ -88,7 +88,14 @@ impl App {
                 });
             }
 
-            Command::FetchTopicDetails(_) => {}
+            Command::FetchTopicDetails(name) => {
+                self.spawn_kafka(move |c, tx| async move {
+                    match c.get_topic_details(&name).await {
+                        Ok(d) => { tx.send(Action::TopicDetailsFetched(d)).ok(); }
+                        Err(e) => { tx.send(Action::TopicDetailsFetchFailed(e.to_string())).ok(); }
+                    }
+                });
+            }
 
             Command::CreateKafkaTopic { name, partitions, replication_factor } => {
                 self.spawn_kafka(move |c, tx| async move {
