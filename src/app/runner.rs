@@ -144,7 +144,14 @@ impl App {
                 });
             }
 
-            Command::FetchConsumerGroupDetails(_) => {}
+            Command::FetchConsumerGroupDetails(group_id) => {
+                self.spawn_kafka(move |c, tx| async move {
+                    match c.get_consumer_group_details(&group_id).await {
+                        Ok(d) => { tx.send(Action::ConsumerGroupDetailsFetched(d)).ok(); }
+                        Err(e) => { tx.send(Action::ConsumerGroupDetailsFetchFailed(e.to_string())).ok(); }
+                    }
+                });
+            }
 
             Command::LoadConnectionProfiles => {
                 match connections::load_connections() {

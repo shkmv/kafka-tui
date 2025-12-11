@@ -202,10 +202,9 @@ pub fn screen_key_binding(screen: &Screen, key: KeyEvent, sidebar_focused: bool)
             (KeyModifiers::CONTROL, KeyCode::Char('r')) | (_, KeyCode::F(5)) => Some(Action::FetchConsumerGroups),
             _ => None,
         },
-        Screen::ConsumerGroupDetails { .. } => match key.code {
-            KeyCode::Left | KeyCode::Char('h') => Some(Action::MoveLeft),
-            KeyCode::Right | KeyCode::Char('l') => Some(Action::MoveRight),
-            KeyCode::F(5) => Some(Action::FetchConsumerGroups),
+        Screen::ConsumerGroupDetails { group_id } => match key.code {
+            KeyCode::Tab | KeyCode::Left | KeyCode::Char('h') | KeyCode::Right | KeyCode::Char('l') => Some(Action::SwitchConsumerGroupDetailTab),
+            KeyCode::F(5) => Some(Action::ViewConsumerGroupDetails(group_id.clone())),
             _ => None,
         },
         Screen::TopicCreate | Screen::MessageProducer { .. } => match key.code {
@@ -223,7 +222,7 @@ pub fn get_help_text(screen: &Screen) -> Vec<(&'static str, &'static str)> {
         Screen::Messages { .. } => vec![("j/k", "Navigate"), ("v", "Detail"), ("p", "Produce"), ("Ctrl+R", "Refresh")],
         Screen::ConsumerGroups => vec![("j/k", "Navigate"), ("Enter", "Details"), ("/", "Filter"), ("Ctrl+R", "Refresh")],
         Screen::TopicDetails { .. } => vec![("Tab", "Switch"), ("m", "Messages"), ("d", "Delete"), ("F5", "Refresh")],
-        Screen::ConsumerGroupDetails { .. } => vec![("h/l", "Tabs"), ("F5", "Refresh")],
+        Screen::ConsumerGroupDetails { .. } => vec![("Tab", "Switch"), ("F5", "Refresh")],
         _ => vec![],
     });
     h

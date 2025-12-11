@@ -10,7 +10,10 @@ use rdkafka::message::{Headers, Message};
 use rdkafka::producer::{FutureProducer, FutureRecord, ProducerContext};
 use rdkafka::TopicPartitionList;
 
-use crate::app::state::{ConsumerGroupInfo, KafkaMessage, OffsetMode, PartitionInfo, TopicDetail, TopicInfo};
+use crate::app::state::{
+    ConsumerGroupDetail, ConsumerGroupInfo, GroupMember, KafkaMessage, OffsetMode,
+    PartitionInfo, PartitionOffset, TopicDetail, TopicInfo, TopicPartition,
+};
 use crate::error::{AppError, AppResult};
 use crate::kafka::config::{KafkaConfig, KafkaSaslMechanism, SecurityConfig};
 
@@ -339,6 +342,118 @@ impl KafkaClient {
 
         config.sort_by(|a, b| a.0.cmp(&b.0));
         Ok(config)
+    }
+
+    pub async fn get_consumer_group_details(&self, group_id: &str) -> AppResult<ConsumerGroupDetail> {
+        // Get group description - extract data before any await
+        let (state, members) = {
+            let groups = self.admin.inner()
+                .fetch_group_list(Some(group_id), Duration::from_secs(10))
+                .map_err(|e| AppError::Kafka(format!("Fetch group: {}", e)))?;
+
+            let group = groups.groups().iter()
+                .find(|g| g.name() == group_id)
+                .ok_or_else(|| AppError::Kafka("Group not found".into()))?;
+
+            let state = group.state().to_string();
+            let members: Vec<GroupMember> = group.members().iter().map(|m| {
+                GroupMember {
+                    member_id: m.id().to_string(),
+                    client_id: m.client_id().to_string(),
+                    client_host: m.client_host().to_string(),
+                    assignments: Self::parse_member_assignment(m.assignment().unwrap_or(&[])),
+                }
+            }).collect();
+
+            (state, members)
+        };
+
+        // Get committed offsets for the group
+        let offsets = self.get_group_offsets(group_id).await.unwrap_or_default();
+
+        Ok(ConsumerGroupDetail {
+            group_id: group_id.to_string(),
+            state,
+            coordinator: None,
+            members,
+            offsets,
+        })
+    }
+
+    fn parse_member_assignment(data: &[u8]) -> Vec<TopicPartition> {
+        // Member assignment is binary protocol, simplified parsing
+        // Format: version(2) + topic_count(4) + [topic_name_len(2) + topic_name + partition_count(4) + [partition(4)]]
+        if data.len() < 6 {
+            return vec![];
+        }
+
+        let mut result = Vec::new();
+        let mut pos = 2; // skip version
+
+        if pos + 4 > data.len() { return result; }
+        let topic_count = i32::from_be_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]) as usize;
+        pos += 4;
+
+        for _ in 0..topic_count {
+            if pos + 2 > data.len() { break; }
+            let topic_len = i16::from_be_bytes([data[pos], data[pos+1]]) as usize;
+            pos += 2;
+
+            if pos + topic_len > data.len() { break; }
+            let topic = String::from_utf8_lossy(&data[pos..pos+topic_len]).to_string();
+            pos += topic_len;
+
+            if pos + 4 > data.len() { break; }
+            let partition_count = i32::from_be_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]) as usize;
+            pos += 4;
+
+            for _ in 0..partition_count {
+                if pos + 4 > data.len() { break; }
+                let partition = i32::from_be_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]);
+                pos += 4;
+                result.push(TopicPartition { topic: topic.clone(), partition });
+            }
+        }
+
+        result
+    }
+
+    async fn get_group_offsets(&self, group_id: &str) -> AppResult<Vec<PartitionOffset>> {
+        // Create a temporary consumer for this group to fetch offsets
+        let mut config = Self::base_config(&self.config);
+        config.set("group.id", group_id);
+
+        let consumer: BaseConsumer<SilentContext> = config
+            .create_with_context(SilentContext)
+            .map_err(|e| AppError::Kafka(format!("Consumer for offsets: {}", e)))?;
+
+        let committed = consumer
+            .committed(Duration::from_secs(10))
+            .map_err(|e| AppError::Kafka(format!("Fetch committed: {}", e)))?;
+
+        let mut offsets = Vec::new();
+        for elem in committed.elements() {
+            let current_offset = match elem.offset() {
+                rdkafka::Offset::Offset(o) => o,
+                _ => continue,
+            };
+
+            // Get log end offset (high watermark)
+            let (_, high) = self.consumer
+                .fetch_watermarks(elem.topic(), elem.partition(), Duration::from_secs(5))
+                .unwrap_or((0, 0));
+
+            offsets.push(PartitionOffset {
+                topic: elem.topic().to_string(),
+                partition: elem.partition(),
+                current_offset,
+                log_end_offset: high,
+                lag: (high - current_offset).max(0),
+            });
+        }
+
+        offsets.sort_by(|a, b| (&a.topic, a.partition).cmp(&(&b.topic, b.partition)));
+        Ok(offsets)
     }
 
     pub fn brokers(&self) -> &str {

@@ -98,6 +98,8 @@ pub enum Action {
     ClearConsumerGroupFilter,
     ViewConsumerGroupDetails(String),
     ConsumerGroupDetailsFetched(ConsumerGroupDetail),
+    ConsumerGroupDetailsFetchFailed(String),
+    SwitchConsumerGroupDetailTab,
 
     // === UI Actions ===
     ShowHelp,

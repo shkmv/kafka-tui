@@ -292,11 +292,29 @@ pub fn update(state: &mut AppState, action: Action) -> Command {
 
         Action::ViewConsumerGroupDetails(id) => {
             state.screen_history.push(state.active_screen.clone());
+            state.consumer_groups_state.current_detail = None;
+            state.consumer_groups_state.detail_tab = ConsumerGroupDetailTab::default();
             state.active_screen = Screen::ConsumerGroupDetails { group_id: id.clone() };
             Command::FetchConsumerGroupDetails(id)
         }
 
-        Action::ConsumerGroupDetailsFetched(_) => Command::None,
+        Action::ConsumerGroupDetailsFetched(detail) => {
+            state.consumer_groups_state.current_detail = Some(detail);
+            Command::None
+        }
+
+        Action::ConsumerGroupDetailsFetchFailed(e) => {
+            toast(state, &format!("Failed to fetch group details: {}", e), ToastLevel::Error);
+            Command::None
+        }
+
+        Action::SwitchConsumerGroupDetailTab => {
+            state.consumer_groups_state.detail_tab = match state.consumer_groups_state.detail_tab {
+                ConsumerGroupDetailTab::Members => ConsumerGroupDetailTab::Offsets,
+                ConsumerGroupDetailTab::Offsets => ConsumerGroupDetailTab::Members,
+            };
+            Command::None
+        }
 
         // UI
         Action::ShowHelp => { state.ui_state.show_help = true; Command::None }

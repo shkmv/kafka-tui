@@ -266,6 +266,15 @@ pub struct ConsumerGroupsState {
     pub selected_index: usize,
     pub filter: String,
     pub loading: bool,
+    pub current_detail: Option<ConsumerGroupDetail>,
+    pub detail_tab: ConsumerGroupDetailTab,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ConsumerGroupDetailTab {
+    #[default]
+    Members,
+    Offsets,
 }
 
 impl ConsumerGroupsState {
