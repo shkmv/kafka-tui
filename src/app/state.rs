@@ -1,62 +1,49 @@
 use std::collections::HashMap;
-
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use strum::{Display, EnumIter};
 use uuid::Uuid;
 
-/// Root application state - the single source of truth
 #[derive(Debug, Default)]
 pub struct AppState {
-    /// Current active screen
     pub active_screen: Screen,
-
-    /// Navigation history for back functionality
     pub screen_history: Vec<Screen>,
-
-    /// Connection state
     pub connection: ConnectionState,
-
-    /// Screen-specific states
     pub topics_state: TopicsState,
     pub messages_state: MessagesState,
     pub consumer_groups_state: ConsumerGroupsState,
-
-    /// Global UI state
+    pub brokers_state: BrokersState,
     pub ui_state: UiState,
-
-    /// Application running flag
     pub running: bool,
-
-    /// Last error (for display)
     pub last_error: Option<String>,
-
-    /// Pending async operations
-    pub pending_operations: HashMap<Uuid, PendingOperation>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Display)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Screen {
     #[default]
     Welcome,
     Topics,
-    TopicDetails {
-        topic_name: String,
-    },
-    TopicCreate,
-    Messages {
-        topic_name: String,
-    },
-    MessageProducer {
-        topic_name: String,
-    },
+    TopicDetails { topic_name: String },
+    Messages { topic_name: String },
     ConsumerGroups,
-    ConsumerGroupDetails {
-        group_id: String,
-    },
+    ConsumerGroupDetails { group_id: String },
+    Brokers,
 }
 
-// === Connection State ===
+impl std::fmt::Display for Screen {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Welcome => write!(f, "Welcome"),
+            Self::Topics => write!(f, "Topics"),
+            Self::TopicDetails { topic_name } => write!(f, "Topic: {}", topic_name),
+            Self::Messages { topic_name } => write!(f, "Messages: {}", topic_name),
+            Self::ConsumerGroups => write!(f, "Consumer Groups"),
+            Self::ConsumerGroupDetails { group_id } => write!(f, "Group: {}", group_id),
+            Self::Brokers => write!(f, "Brokers"),
+        }
+    }
+}
+
+// === Connection ===
 
 #[derive(Debug, Default)]
 pub struct ConnectionState {
@@ -103,18 +90,9 @@ impl Default for ConnectionProfile {
 pub enum AuthConfig {
     #[default]
     None,
-    SaslPlain {
-        username: String,
-        password: String,
-    },
-    SaslScram256 {
-        username: String,
-        password: String,
-    },
-    SaslScram512 {
-        username: String,
-        password: String,
-    },
+    SaslPlain { username: String, password: String },
+    SaslScram256 { username: String, password: String },
+    SaslScram512 { username: String, password: String },
     Ssl {
         ca_location: Option<String>,
         cert_location: Option<String>,
@@ -138,7 +116,7 @@ pub enum SaslMechanism {
     ScramSha512,
 }
 
-// === Topics State ===
+// === Topics ===
 
 #[derive(Debug, Default)]
 pub struct TopicsState {
@@ -164,17 +142,13 @@ impl TopicsState {
         if self.filter.is_empty() {
             self.topics.iter().collect()
         } else {
-            let filter_lower = self.filter.to_lowercase();
-            self.topics
-                .iter()
-                .filter(|t| t.name.to_lowercase().contains(&filter_lower))
-                .collect()
+            let f = self.filter.to_lowercase();
+            self.topics.iter().filter(|t| t.name.to_lowercase().contains(&f)).collect()
         }
     }
 
     pub fn selected_topic(&self) -> Option<&TopicInfo> {
-        let filtered = self.filtered_topics();
-        filtered.get(self.selected_index).copied()
+        self.filtered_topics().get(self.selected_index).copied()
     }
 }
 
@@ -211,7 +185,7 @@ impl PartitionInfo {
     }
 }
 
-#[derive(Debug, Clone, Default, EnumIter, Display, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum TopicSortField {
     #[default]
     Name,
@@ -219,7 +193,7 @@ pub enum TopicSortField {
     Replication,
 }
 
-// === Messages State ===
+// === Messages ===
 
 #[derive(Debug, Default)]
 pub struct MessagesState {
@@ -258,7 +232,7 @@ pub enum OffsetMode {
     Timestamp(DateTime<Utc>),
 }
 
-// === Consumer Groups State ===
+// === Consumer Groups ===
 
 #[derive(Debug, Default)]
 pub struct ConsumerGroupsState {
@@ -282,17 +256,13 @@ impl ConsumerGroupsState {
         if self.filter.is_empty() {
             self.groups.iter().collect()
         } else {
-            let filter_lower = self.filter.to_lowercase();
-            self.groups
-                .iter()
-                .filter(|g| g.group_id.to_lowercase().contains(&filter_lower))
-                .collect()
+            let f = self.filter.to_lowercase();
+            self.groups.iter().filter(|g| g.group_id.to_lowercase().contains(&f)).collect()
         }
     }
 
     pub fn selected_group(&self) -> Option<&ConsumerGroupInfo> {
-        let filtered = self.filtered_groups();
-        filtered.get(self.selected_index).copied()
+        self.filtered_groups().get(self.selected_index).copied()
     }
 }
 
@@ -319,6 +289,7 @@ pub struct BrokerInfo {
     pub id: i32,
     pub host: String,
     pub port: i32,
+    pub is_controller: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -344,7 +315,17 @@ pub struct PartitionOffset {
     pub lag: i64,
 }
 
-// === UI State ===
+// === Brokers ===
+
+#[derive(Debug, Default)]
+pub struct BrokersState {
+    pub brokers: Vec<BrokerInfo>,
+    pub selected_index: usize,
+    pub loading: bool,
+    pub cluster_id: Option<String>,
+}
+
+// === UI ===
 
 #[derive(Debug, Default)]
 pub struct UiState {
@@ -355,7 +336,7 @@ pub struct UiState {
     pub selected_sidebar_item: SidebarItem,
 }
 
-#[derive(Debug, Clone, Default, EnumIter, Display, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum SidebarItem {
     #[default]
     Topics,
@@ -364,30 +345,47 @@ pub enum SidebarItem {
 }
 
 impl SidebarItem {
+    pub const ALL: [SidebarItem; 3] = [Self::Topics, Self::ConsumerGroups, Self::Brokers];
+
     pub fn to_screen(&self) -> Screen {
         match self {
-            SidebarItem::Topics => Screen::Topics,
-            SidebarItem::ConsumerGroups => Screen::ConsumerGroups,
-            SidebarItem::Brokers => Screen::Topics, // TODO: Implement Brokers screen
+            Self::Topics => Screen::Topics,
+            Self::ConsumerGroups => Screen::ConsumerGroups,
+            Self::Brokers => Screen::Brokers,
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Topics => "Topics",
+            Self::ConsumerGroups => "Consumer Groups",
+            Self::Brokers => "Brokers",
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum ModalType {
-    Confirm {
-        title: String,
-        message: String,
-        action: ConfirmAction,
-    },
-    Input {
-        title: String,
-        placeholder: String,
-        value: String,
-        action: InputAction,
-    },
+    Confirm { title: String, message: String, action: ConfirmAction },
+    Input { title: String, placeholder: String, value: String, action: InputAction },
     ConnectionForm(ConnectionFormState),
     TopicCreateForm(TopicCreateFormState),
+    ProduceForm(ProduceFormState),
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ProduceFormState {
+    pub topic: String,
+    pub key: String,
+    pub value: String,
+    pub focused_field: ProduceFormField,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ProduceFormField {
+    #[default]
+    Key,
+    Value,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -410,7 +408,7 @@ pub enum ConnectionFormField {
     Password,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Copy)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AuthType {
     #[default]
     None,
@@ -422,33 +420,33 @@ pub enum AuthType {
 impl AuthType {
     pub fn display_name(&self) -> &'static str {
         match self {
-            AuthType::None => "None",
-            AuthType::SaslPlain => "SASL/PLAIN",
-            AuthType::SaslScram256 => "SASL/SCRAM-256",
-            AuthType::SaslScram512 => "SASL/SCRAM-512",
+            Self::None => "None",
+            Self::SaslPlain => "SASL/PLAIN",
+            Self::SaslScram256 => "SCRAM-256",
+            Self::SaslScram512 => "SCRAM-512",
         }
     }
 
     pub fn next(&self) -> Self {
         match self {
-            AuthType::None => AuthType::SaslPlain,
-            AuthType::SaslPlain => AuthType::SaslScram256,
-            AuthType::SaslScram256 => AuthType::SaslScram512,
-            AuthType::SaslScram512 => AuthType::None,
+            Self::None => Self::SaslPlain,
+            Self::SaslPlain => Self::SaslScram256,
+            Self::SaslScram256 => Self::SaslScram512,
+            Self::SaslScram512 => Self::None,
         }
     }
 
     pub fn prev(&self) -> Self {
         match self {
-            AuthType::None => AuthType::SaslScram512,
-            AuthType::SaslPlain => AuthType::None,
-            AuthType::SaslScram256 => AuthType::SaslPlain,
-            AuthType::SaslScram512 => AuthType::SaslScram256,
+            Self::None => Self::SaslScram512,
+            Self::SaslPlain => Self::None,
+            Self::SaslScram256 => Self::SaslPlain,
+            Self::SaslScram512 => Self::SaslScram256,
         }
     }
 
     pub fn requires_credentials(&self) -> bool {
-        !matches!(self, AuthType::None)
+        !matches!(self, Self::None)
     }
 }
 
@@ -464,8 +462,8 @@ impl Default for TopicCreateFormState {
     fn default() -> Self {
         Self {
             name: String::new(),
-            partitions: "1".to_string(),
-            replication_factor: "1".to_string(),
+            partitions: "1".into(),
+            replication_factor: "1".into(),
             focused_field: TopicCreateFormField::Name,
         }
     }
@@ -482,7 +480,7 @@ pub enum TopicCreateFormField {
 #[derive(Debug, Clone)]
 pub enum ConfirmAction {
     DeleteTopic(String),
-    DeleteConnection(uuid::Uuid),
+    DeleteConnection(Uuid),
     DisconnectCluster,
 }
 
@@ -508,23 +506,4 @@ pub enum ToastLevel {
     Success,
     Warning,
     Error,
-}
-
-// === Async Operations ===
-
-#[derive(Debug)]
-pub struct PendingOperation {
-    pub operation_type: OperationType,
-    pub started_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone)]
-pub enum OperationType {
-    Connecting,
-    FetchTopics,
-    FetchMessages(String),
-    FetchConsumerGroups,
-    CreateTopic,
-    DeleteTopic,
-    ProduceMessage,
 }

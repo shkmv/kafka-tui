@@ -7,28 +7,27 @@ use crate::app::state::*;
 pub fn update(state: &mut AppState, action: Action) -> Command {
     match action {
         // System
-        Action::Tick => { clean_expired_toasts(&mut state.ui_state.toast_messages); Command::None }
+        Action::Tick => { expire_toasts(&mut state.ui_state.toast_messages); Command::None }
         Action::Quit => { state.running = false; Command::None }
         Action::Resize(_, _) => Command::None,
-        Action::ClearError => { state.last_error = None; Command::None }
 
         // Navigation
         Action::Navigate(screen) => {
-            if state.active_screen != screen {
-                state.screen_history.push(state.active_screen.clone());
-                state.active_screen = screen.clone();
-                match screen {
-                    Screen::Topics => Command::FetchTopicList,
-                    Screen::ConsumerGroups => Command::FetchConsumerGroupList,
-                    Screen::Messages { ref topic_name } => Command::FetchMessages {
-                        topic: topic_name.clone(),
-                        offset_mode: state.messages_state.offset_mode.clone(),
-                        partition: state.messages_state.partition_filter,
-                        limit: 100,
-                    },
-                    _ => Command::None,
-                }
-            } else { Command::None }
+            if state.active_screen == screen { return Command::None; }
+            state.screen_history.push(state.active_screen.clone());
+            state.active_screen = screen.clone();
+            match screen {
+                Screen::Topics => Command::FetchTopicList,
+                Screen::ConsumerGroups => Command::FetchConsumerGroupList,
+                Screen::Brokers => Command::FetchBrokerList,
+                Screen::Messages { ref topic_name } => Command::FetchMessages {
+                    topic: topic_name.clone(),
+                    offset_mode: state.messages_state.offset_mode.clone(),
+                    partition: state.messages_state.partition_filter,
+                    limit: 100,
+                },
+                _ => Command::None,
+            }
         }
 
         Action::GoBack => {
@@ -56,7 +55,7 @@ pub fn update(state: &mut AppState, action: Action) -> Command {
         Action::ConnectionSuccess => {
             state.connection.status = ConnectionStatus::Connected;
             state.active_screen = Screen::Topics;
-            toast(state, "Connected to Kafka cluster", ToastLevel::Success);
+            toast(state, "Connected", ToastLevel::Success);
             let mut cmds = vec![Command::FetchTopicList, Command::FetchConsumerGroupList];
             if let Some(p) = &state.connection.active_profile {
                 cmds.push(Command::SaveConnectionProfile(p.clone()));
@@ -67,7 +66,6 @@ pub fn update(state: &mut AppState, action: Action) -> Command {
         Action::ConnectionFailed(e) => {
             state.connection.status = ConnectionStatus::Error(e.clone());
             state.connection.active_profile = None;
-            state.last_error = Some(e.clone());
             toast(state, &format!("Connection failed: {}", e), ToastLevel::Error);
             Command::None
         }
@@ -90,7 +88,7 @@ pub fn update(state: &mut AppState, action: Action) -> Command {
             if let Some(profile) = state.connection.available_profiles.get(state.connection.selected_index).cloned() {
                 update(state, Action::ShowModal(ModalType::Confirm {
                     title: "Delete Connection".into(),
-                    message: format!("Delete connection '{}'?", profile.name),
+                    message: format!("Delete '{}'?", profile.name),
                     action: ConfirmAction::DeleteConnection(profile.id),
                 }))
             } else { Command::None }
@@ -100,9 +98,9 @@ pub fn update(state: &mut AppState, action: Action) -> Command {
 
         Action::ConnectionDeleted(id) => {
             state.connection.available_profiles.retain(|p| p.id != id);
-            if state.connection.selected_index >= state.connection.available_profiles.len() {
-                state.connection.selected_index = state.connection.available_profiles.len().saturating_sub(1);
-            }
+            state.connection.selected_index = state.connection.selected_index.min(
+                state.connection.available_profiles.len().saturating_sub(1)
+            );
             toast(state, "Connection deleted", ToastLevel::Success);
             Command::None
         }
@@ -164,13 +162,12 @@ pub fn update(state: &mut AppState, action: Action) -> Command {
             Command::FetchTopicList
         }
 
-        Action::TopicDeleteFailed(e) => { toast(state, &format!("Failed to delete topic: {}", e), ToastLevel::Error); Command::None }
+        Action::TopicDeleteFailed(e) => { toast(state, &format!("Delete failed: {}", e), ToastLevel::Error); Command::None }
 
         Action::RequestViewTopicDetails => {
-            if let Some(topic) = state.topics_state.selected_topic() {
-                let name = topic.name.clone();
-                update(state, Action::ViewTopicDetails(name))
-            } else { Command::None }
+            state.topics_state.selected_topic().map(|t| t.name.clone())
+                .map(|n| update(state, Action::ViewTopicDetails(n)))
+                .unwrap_or(Command::None)
         }
 
         Action::ViewTopicDetails(name) => {
@@ -181,15 +178,8 @@ pub fn update(state: &mut AppState, action: Action) -> Command {
             Command::FetchTopicDetails(name)
         }
 
-        Action::TopicDetailsFetched(detail) => {
-            state.topics_state.current_detail = Some(detail);
-            Command::None
-        }
-
-        Action::TopicDetailsFetchFailed(e) => {
-            toast(state, &format!("Failed to fetch topic details: {}", e), ToastLevel::Error);
-            Command::None
-        }
+        Action::TopicDetailsFetched(detail) => { state.topics_state.current_detail = Some(detail); Command::None }
+        Action::TopicDetailsFetchFailed(e) => { toast(state, &e, ToastLevel::Error); Command::None }
 
         Action::SwitchTopicDetailTab => {
             state.topics_state.detail_tab = match state.topics_state.detail_tab {
@@ -246,7 +236,11 @@ pub fn update(state: &mut AppState, action: Action) -> Command {
 
         Action::StartConsuming { topic } => {
             state.messages_state.consumer_running = true;
-            Command::StartMessageConsumer { topic, offset_mode: state.messages_state.offset_mode.clone(), partition: state.messages_state.partition_filter }
+            Command::StartMessageConsumer {
+                topic,
+                offset_mode: state.messages_state.offset_mode.clone(),
+                partition: state.messages_state.partition_filter,
+            }
         }
 
         Action::StopConsuming => { state.messages_state.consumer_running = false; Command::StopMessageConsumer }
@@ -262,7 +256,7 @@ pub fn update(state: &mut AppState, action: Action) -> Command {
             } else { Command::None }
         }
 
-        Action::MessageProduceFailed(e) => { toast(state, &format!("Failed to produce: {}", e), ToastLevel::Error); Command::None }
+        Action::MessageProduceFailed(e) => { toast(state, &format!("Produce failed: {}", e), ToastLevel::Error); Command::None }
         Action::ToggleMessageDetail => { state.messages_state.detail_expanded = !state.messages_state.detail_expanded; Command::None }
         Action::ClearMessages => { state.messages_state.messages.clear(); state.messages_state.selected_index = 0; Command::None }
 
@@ -298,21 +292,30 @@ pub fn update(state: &mut AppState, action: Action) -> Command {
             Command::FetchConsumerGroupDetails(id)
         }
 
-        Action::ConsumerGroupDetailsFetched(detail) => {
-            state.consumer_groups_state.current_detail = Some(detail);
-            Command::None
-        }
-
-        Action::ConsumerGroupDetailsFetchFailed(e) => {
-            toast(state, &format!("Failed to fetch group details: {}", e), ToastLevel::Error);
-            Command::None
-        }
+        Action::ConsumerGroupDetailsFetched(detail) => { state.consumer_groups_state.current_detail = Some(detail); Command::None }
+        Action::ConsumerGroupDetailsFetchFailed(e) => { toast(state, &e, ToastLevel::Error); Command::None }
 
         Action::SwitchConsumerGroupDetailTab => {
             state.consumer_groups_state.detail_tab = match state.consumer_groups_state.detail_tab {
                 ConsumerGroupDetailTab::Members => ConsumerGroupDetailTab::Offsets,
                 ConsumerGroupDetailTab::Offsets => ConsumerGroupDetailTab::Members,
             };
+            Command::None
+        }
+
+        // Brokers
+        Action::FetchBrokers => { state.brokers_state.loading = true; Command::FetchBrokerList }
+
+        Action::BrokersFetched { brokers, cluster_id } => {
+            state.brokers_state.brokers = brokers;
+            state.brokers_state.cluster_id = cluster_id;
+            state.brokers_state.loading = false;
+            Command::None
+        }
+
+        Action::BrokersFetchFailed(e) => {
+            state.brokers_state.loading = false;
+            toast(state, &format!("Failed to fetch brokers: {}", e), ToastLevel::Error);
             Command::None
         }
 
@@ -339,19 +342,23 @@ pub fn update(state: &mut AppState, action: Action) -> Command {
             Command::None
         }
 
+        Action::UpdateProduceForm(f) => {
+            if let Some(ModalType::ProduceForm(s)) = &mut state.ui_state.active_modal { *s = f; }
+            Command::None
+        }
+
         Action::ShowToast { message, level } => { toast(state, &message, level); Command::None }
         Action::DismissToast(id) => { state.ui_state.toast_messages.retain(|t| t.id != id); Command::None }
-        Action::ClearToasts => { state.ui_state.toast_messages.clear(); Command::None }
 
-        // Navigation
+        // List Navigation
         Action::MoveUp => { nav_up(state); Command::None }
         Action::MoveDown => { nav_down(state); Command::None }
         Action::MoveLeft => { if state.ui_state.sidebar_focused { sidebar_prev(state); } Command::None }
         Action::MoveRight => { if state.ui_state.sidebar_focused { sidebar_next(state); } Command::None }
         Action::PageUp => { for _ in 0..10 { nav_up(state); } Command::None }
         Action::PageDown => { for _ in 0..10 { nav_down(state); } Command::None }
-        Action::ScrollToTop => { nav_top(state); Command::None }
-        Action::ScrollToBottom => { nav_bottom(state); Command::None }
+        Action::ScrollToTop => { nav_to(state, 0); Command::None }
+        Action::ScrollToBottom => { nav_to(state, usize::MAX); Command::None }
         Action::Select => handle_select(state),
         Action::Cancel => update(state, Action::GoBack),
     }
@@ -363,7 +370,7 @@ fn toast(state: &mut AppState, msg: &str, level: ToastLevel) {
     });
 }
 
-fn clean_expired_toasts(toasts: &mut Vec<ToastMessage>) {
+fn expire_toasts(toasts: &mut Vec<ToastMessage>) {
     let now = Utc::now();
     toasts.retain(|t| now.signed_duration_since(t.created_at) < chrono::Duration::seconds(5));
 }
@@ -412,6 +419,12 @@ fn handle_modal_confirm(state: &mut AppState) -> Command {
             partitions: f.partitions.parse().unwrap_or(1),
             replication_factor: f.replication_factor.parse().unwrap_or(1),
         },
+        ModalType::ProduceForm(f) => Command::ProduceKafkaMessage {
+            topic: f.topic,
+            key: if f.key.is_empty() { None } else { Some(f.key) },
+            value: f.value,
+            headers: Default::default(),
+        },
     }
 }
 
@@ -430,20 +443,38 @@ fn nav_down(state: &mut AppState) {
     if state.ui_state.sidebar_focused { return sidebar_next(state); }
     match &state.active_screen {
         Screen::Topics => {
+            let max = state.topics_state.filtered_topics().len();
+            if state.topics_state.selected_index + 1 < max { state.topics_state.selected_index += 1; }
+        }
+        Screen::Messages { .. } => {
+            let max = state.messages_state.messages.len();
+            if state.messages_state.selected_index + 1 < max { state.messages_state.selected_index += 1; }
+        }
+        Screen::ConsumerGroups => {
+            let max = state.consumer_groups_state.filtered_groups().len();
+            if state.consumer_groups_state.selected_index + 1 < max { state.consumer_groups_state.selected_index += 1; }
+        }
+        Screen::Welcome => {
+            let max = state.connection.available_profiles.len();
+            if state.connection.selected_index + 1 < max { state.connection.selected_index += 1; }
+        }
+        _ => {}
+    }
+}
+
+fn nav_to(state: &mut AppState, target: usize) {
+    match &state.active_screen {
+        Screen::Topics => {
             let max = state.topics_state.filtered_topics().len().saturating_sub(1);
-            if state.topics_state.selected_index < max { state.topics_state.selected_index += 1; }
+            state.topics_state.selected_index = target.min(max);
         }
         Screen::Messages { .. } => {
             let max = state.messages_state.messages.len().saturating_sub(1);
-            if state.messages_state.selected_index < max { state.messages_state.selected_index += 1; }
+            state.messages_state.selected_index = target.min(max);
         }
         Screen::ConsumerGroups => {
             let max = state.consumer_groups_state.filtered_groups().len().saturating_sub(1);
-            if state.consumer_groups_state.selected_index < max { state.consumer_groups_state.selected_index += 1; }
-        }
-        Screen::Welcome => {
-            let max = state.connection.available_profiles.len().saturating_sub(1);
-            if state.connection.selected_index < max { state.connection.selected_index += 1; }
+            state.consumer_groups_state.selected_index = target.min(max);
         }
         _ => {}
     }
@@ -463,24 +494,6 @@ fn sidebar_next(state: &mut AppState) {
         SidebarItem::ConsumerGroups => SidebarItem::Brokers,
         SidebarItem::Brokers => SidebarItem::Topics,
     };
-}
-
-fn nav_top(state: &mut AppState) {
-    match &state.active_screen {
-        Screen::Topics => state.topics_state.selected_index = 0,
-        Screen::Messages { .. } => state.messages_state.selected_index = 0,
-        Screen::ConsumerGroups => state.consumer_groups_state.selected_index = 0,
-        _ => {}
-    }
-}
-
-fn nav_bottom(state: &mut AppState) {
-    match &state.active_screen {
-        Screen::Topics => state.topics_state.selected_index = state.topics_state.filtered_topics().len().saturating_sub(1),
-        Screen::Messages { .. } => state.messages_state.selected_index = state.messages_state.messages.len().saturating_sub(1),
-        Screen::ConsumerGroups => state.consumer_groups_state.selected_index = state.consumer_groups_state.filtered_groups().len().saturating_sub(1),
-        _ => {}
-    }
 }
 
 fn handle_select(state: &mut AppState) -> Command {

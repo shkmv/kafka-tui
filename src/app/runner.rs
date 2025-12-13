@@ -153,6 +153,15 @@ impl App {
                 });
             }
 
+            Command::FetchBrokerList => {
+                self.spawn_kafka(|c, tx| async move {
+                    match c.list_brokers().await {
+                        Ok((brokers, cluster_id)) => { tx.send(Action::BrokersFetched { brokers, cluster_id }).ok(); }
+                        Err(e) => { tx.send(Action::BrokersFetchFailed(e.to_string())).ok(); }
+                    }
+                });
+            }
+
             Command::LoadConnectionProfiles => {
                 match connections::load_connections() {
                     Ok(p) => { self.tx.send(Action::ConnectionsLoaded(p)).ok(); }
@@ -176,7 +185,6 @@ impl App {
                 }
             }
 
-            Command::SaveToHistory(_) | Command::LoadHistory | Command::ScheduleTick(_) => {}
         }
     }
 

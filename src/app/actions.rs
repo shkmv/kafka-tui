@@ -1,27 +1,26 @@
 use std::collections::HashMap;
 
 use crate::app::state::{
-    ConnectionFormState, ConnectionProfile, ConsumerGroupDetail, ConsumerGroupInfo, KafkaMessage,
-    ModalType, OffsetMode, Screen, SidebarItem, ToastLevel, TopicCreateFormState, TopicInfo, TopicSortField,
+    BrokerInfo, ConnectionFormState, ConnectionProfile, ConsumerGroupDetail, ConsumerGroupInfo,
+    KafkaMessage, ModalType, OffsetMode, ProduceFormState, Screen, SidebarItem, ToastLevel,
+    TopicCreateFormState, TopicDetail, TopicInfo, TopicSortField,
 };
 
-/// All possible actions in the application (TEA Messages)
 #[derive(Debug, Clone)]
 pub enum Action {
-    // === System Actions ===
+    // System
     Tick,
     Quit,
     Resize(u16, u16),
-    ClearError,
 
-    // === Navigation Actions ===
+    // Navigation
     Navigate(Screen),
     GoBack,
     FocusSidebar,
     FocusContent,
     SelectSidebarItem(SidebarItem),
 
-    // === Connection Actions ===
+    // Connection
     Connect(ConnectionProfile),
     Disconnect,
     ConnectionSuccess,
@@ -33,7 +32,7 @@ pub enum Action {
     DeleteConnection(uuid::Uuid),
     ConnectionDeleted(uuid::Uuid),
 
-    // === Topic Actions ===
+    // Topics
     FetchTopics,
     TopicsFetched(Vec<TopicInfo>),
     TopicsFetchFailed(String),
@@ -41,55 +40,36 @@ pub enum Action {
     FilterTopics(String),
     ClearTopicFilter,
     SortTopics(TopicSortField),
-    CreateTopic {
-        name: String,
-        partitions: i32,
-        replication_factor: i32,
-    },
-    TopicCreated {
-        name: String,
-        partitions: i32,
-        replication_factor: i32,
-    },
+    CreateTopic { name: String, partitions: i32, replication_factor: i32 },
+    TopicCreated { name: String, partitions: i32, replication_factor: i32 },
     TopicCreateFailed(String),
     DeleteTopic(String),
     TopicDeleted(String),
     TopicDeleteFailed(String),
     RequestViewTopicDetails,
     ViewTopicDetails(String),
-    TopicDetailsFetched(crate::app::state::TopicDetail),
+    TopicDetailsFetched(TopicDetail),
     TopicDetailsFetchFailed(String),
     SwitchTopicDetailTab,
     ViewTopicMessages(String),
 
-    // === Message Actions ===
-    FetchMessages {
-        topic: String,
-        offset_mode: OffsetMode,
-        partition: Option<i32>,
-    },
+    // Messages
+    FetchMessages { topic: String, offset_mode: OffsetMode, partition: Option<i32> },
     MessagesFetched(Vec<KafkaMessage>),
     MessageReceived(KafkaMessage),
     MessagesFetchFailed(String),
     SelectMessage(usize),
     SetOffsetMode(OffsetMode),
     SetPartitionFilter(Option<i32>),
-    StartConsuming {
-        topic: String,
-    },
+    StartConsuming { topic: String },
     StopConsuming,
-    ProduceMessage {
-        topic: String,
-        key: Option<String>,
-        value: String,
-        headers: HashMap<String, String>,
-    },
+    ProduceMessage { topic: String, key: Option<String>, value: String, headers: HashMap<String, String> },
     MessageProduced,
     MessageProduceFailed(String),
     ToggleMessageDetail,
     ClearMessages,
 
-    // === Consumer Group Actions ===
+    // Consumer Groups
     FetchConsumerGroups,
     ConsumerGroupsFetched(Vec<ConsumerGroupInfo>),
     ConsumerGroupsFetchFailed(String),
@@ -101,7 +81,12 @@ pub enum Action {
     ConsumerGroupDetailsFetchFailed(String),
     SwitchConsumerGroupDetailTab,
 
-    // === UI Actions ===
+    // Brokers
+    FetchBrokers,
+    BrokersFetched { brokers: Vec<BrokerInfo>, cluster_id: Option<String> },
+    BrokersFetchFailed(String),
+
+    // UI
     ShowHelp,
     HideHelp,
     ShowModal(ModalType),
@@ -111,14 +96,11 @@ pub enum Action {
     UpdateModalInput(String),
     UpdateConnectionForm(ConnectionFormState),
     UpdateTopicCreateForm(TopicCreateFormState),
-    ShowToast {
-        message: String,
-        level: ToastLevel,
-    },
+    UpdateProduceForm(ProduceFormState),
+    ShowToast { message: String, level: ToastLevel },
     DismissToast(uuid::Uuid),
-    ClearToasts,
 
-    // === Input Actions (List Navigation) ===
+    // Navigation
     MoveUp,
     MoveDown,
     MoveLeft,
@@ -131,85 +113,28 @@ pub enum Action {
     Cancel,
 }
 
-/// Commands represent side effects to be executed asynchronously
 #[derive(Debug)]
 pub enum Command {
     None,
     Batch(Vec<Command>),
 
-    // === Kafka Operations ===
+    // Kafka
     ConnectToKafka(ConnectionProfile),
     DisconnectFromKafka,
     FetchTopicList,
     FetchTopicDetails(String),
-    CreateKafkaTopic {
-        name: String,
-        partitions: i32,
-        replication_factor: i32,
-    },
+    CreateKafkaTopic { name: String, partitions: i32, replication_factor: i32 },
     DeleteKafkaTopic(String),
-    FetchMessages {
-        topic: String,
-        offset_mode: OffsetMode,
-        partition: Option<i32>,
-        limit: usize,
-    },
-    StartMessageConsumer {
-        topic: String,
-        offset_mode: OffsetMode,
-        partition: Option<i32>,
-    },
+    FetchMessages { topic: String, offset_mode: OffsetMode, partition: Option<i32>, limit: usize },
+    StartMessageConsumer { topic: String, offset_mode: OffsetMode, partition: Option<i32> },
     StopMessageConsumer,
-    ProduceKafkaMessage {
-        topic: String,
-        key: Option<String>,
-        value: String,
-        headers: HashMap<String, String>,
-    },
+    ProduceKafkaMessage { topic: String, key: Option<String>, value: String, headers: HashMap<String, String> },
     FetchConsumerGroupList,
     FetchConsumerGroupDetails(String),
+    FetchBrokerList,
 
-    // === Database Operations ===
+    // Storage
     LoadConnectionProfiles,
     SaveConnectionProfile(ConnectionProfile),
     DeleteConnectionProfile(uuid::Uuid),
-    SaveToHistory(HistoryEntry),
-    LoadHistory,
-
-    // === Timer Operations ===
-    ScheduleTick(std::time::Duration),
-}
-
-impl Command {
-    pub fn batch(commands: impl IntoIterator<Item = Command>) -> Command {
-        let cmds: Vec<Command> = commands.into_iter().collect();
-        if cmds.is_empty() {
-            Command::None
-        } else if cmds.len() == 1 {
-            cmds.into_iter().next().unwrap()
-        } else {
-            Command::Batch(cmds)
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct HistoryEntry {
-    pub entry_type: HistoryType,
-    pub connection_id: uuid::Uuid,
-    pub timestamp: chrono::DateTime<chrono::Utc>,
-}
-
-#[derive(Debug, Clone)]
-pub enum HistoryType {
-    ProducedMessage {
-        topic: String,
-        key: Option<String>,
-        value: String,
-    },
-    ConsumedMessage {
-        topic: String,
-        partition: i32,
-        offset: i64,
-    },
 }

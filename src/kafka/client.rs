@@ -11,7 +11,7 @@ use rdkafka::producer::{FutureProducer, FutureRecord, ProducerContext};
 use rdkafka::TopicPartitionList;
 
 use crate::app::state::{
-    ConsumerGroupDetail, ConsumerGroupInfo, GroupMember, KafkaMessage, OffsetMode,
+    BrokerInfo, ConsumerGroupDetail, ConsumerGroupInfo, GroupMember, KafkaMessage, OffsetMode,
     PartitionInfo, PartitionOffset, TopicDetail, TopicInfo, TopicPartition,
 };
 use crate::error::{AppError, AppResult};
@@ -454,6 +454,25 @@ impl KafkaClient {
 
         offsets.sort_by(|a, b| (&a.topic, a.partition).cmp(&(&b.topic, b.partition)));
         Ok(offsets)
+    }
+
+    pub async fn list_brokers(&self) -> AppResult<(Vec<BrokerInfo>, Option<String>)> {
+        let metadata = self.consumer
+            .fetch_metadata(None, Duration::from_secs(10))
+            .map_err(|e| AppError::Kafka(format!("Metadata fetch: {}", e)))?;
+
+        let controller_id = metadata.orig_broker_id();
+
+        let brokers: Vec<BrokerInfo> = metadata.brokers().iter().map(|b| {
+            BrokerInfo {
+                id: b.id(),
+                host: b.host().to_string(),
+                port: b.port(),
+                is_controller: b.id() == controller_id,
+            }
+        }).collect();
+
+        Ok((brokers, None)) // cluster_id not easily available in rdkafka
     }
 
     pub fn brokers(&self) -> &str {

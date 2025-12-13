@@ -44,17 +44,16 @@ impl Header {
 
         // Connection status
         let (status_text, status_style) = match &state.connection.status {
-            ConnectionStatus::Connected => ("Connected", THEME.status_connected()),
-            ConnectionStatus::Connecting => ("Connecting...", THEME.status_connecting()),
-            ConnectionStatus::Disconnected => ("Disconnected", THEME.status_disconnected()),
+            ConnectionStatus::Connected => ("Connected".to_string(), THEME.status_connected()),
+            ConnectionStatus::Connecting => ("Connecting...".to_string(), THEME.status_connecting()),
+            ConnectionStatus::Disconnected => ("Disconnected".to_string(), THEME.status_disconnected()),
             ConnectionStatus::Error(e) => {
                 let msg = if e.len() > 15 {
                     format!("Error: {}...", &e[..12])
                 } else {
                     format!("Error: {}", e)
                 };
-                // Return tuple with owned string - need different approach
-                (Box::leak(msg.into_boxed_str()) as &str, THEME.error_style())
+                (msg, THEME.error_style())
             }
         };
 

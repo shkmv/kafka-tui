@@ -38,6 +38,7 @@ pub fn modal_key_binding(key: KeyEvent, modal: &ModalType) -> Option<Action> {
         },
         ModalType::ConnectionForm(f) => connection_form_key(key, f),
         ModalType::TopicCreateForm(f) => topic_form_key(key, f),
+        ModalType::ProduceForm(f) => produce_form_key(key, f),
     }
 }
 
@@ -50,8 +51,8 @@ fn connection_form_key(key: KeyEvent, f: &ConnectionFormState) -> Option<Action>
                 && (!f.auth_type.requires_credentials() || (!f.username.is_empty() && !f.password.is_empty()));
             return ok.then_some(Action::ModalConfirm);
         }
-        KeyCode::Tab | KeyCode::Down => s.focused_field = conn_field_next(&f.focused_field, &f.auth_type),
-        KeyCode::BackTab | KeyCode::Up => s.focused_field = conn_field_prev(&f.focused_field, &f.auth_type),
+        KeyCode::Tab | KeyCode::Down => s.focused_field = conn_next(&f.focused_field, &f.auth_type),
+        KeyCode::BackTab | KeyCode::Up => s.focused_field = conn_prev(&f.focused_field, &f.auth_type),
         KeyCode::Left if f.focused_field == ConnectionFormField::AuthType => {
             s.auth_type = f.auth_type.prev();
             if !s.auth_type.requires_credentials() { s.username.clear(); s.password.clear(); }
@@ -63,23 +64,23 @@ fn connection_form_key(key: KeyEvent, f: &ConnectionFormState) -> Option<Action>
         KeyCode::Char(c) => match f.focused_field {
             ConnectionFormField::Name => s.name.push(c),
             ConnectionFormField::Brokers => s.brokers.push(c),
-            ConnectionFormField::AuthType => return None,
             ConnectionFormField::Username => s.username.push(c),
             ConnectionFormField::Password => s.password.push(c),
+            _ => return None,
         },
         KeyCode::Backspace => match f.focused_field {
             ConnectionFormField::Name => { s.name.pop(); }
             ConnectionFormField::Brokers => { s.brokers.pop(); }
-            ConnectionFormField::AuthType => return None,
             ConnectionFormField::Username => { s.username.pop(); }
             ConnectionFormField::Password => { s.password.pop(); }
+            _ => return None,
         },
         _ => return None,
     }
     Some(Action::UpdateConnectionForm(s))
 }
 
-fn conn_field_next(f: &ConnectionFormField, auth: &AuthType) -> ConnectionFormField {
+fn conn_next(f: &ConnectionFormField, auth: &AuthType) -> ConnectionFormField {
     match f {
         ConnectionFormField::Name => ConnectionFormField::Brokers,
         ConnectionFormField::Brokers => ConnectionFormField::AuthType,
@@ -89,7 +90,7 @@ fn conn_field_next(f: &ConnectionFormField, auth: &AuthType) -> ConnectionFormFi
     }
 }
 
-fn conn_field_prev(f: &ConnectionFormField, auth: &AuthType) -> ConnectionFormField {
+fn conn_prev(f: &ConnectionFormField, auth: &AuthType) -> ConnectionFormField {
     match f {
         ConnectionFormField::Name => if auth.requires_credentials() { ConnectionFormField::Password } else { ConnectionFormField::AuthType },
         ConnectionFormField::Brokers => ConnectionFormField::Name,
@@ -130,6 +131,30 @@ fn topic_form_key(key: KeyEvent, f: &TopicCreateFormState) -> Option<Action> {
     Some(Action::UpdateTopicCreateForm(s))
 }
 
+fn produce_form_key(key: KeyEvent, f: &ProduceFormState) -> Option<Action> {
+    let mut s = f.clone();
+    match key.code {
+        KeyCode::Esc => return Some(Action::ModalCancel),
+        KeyCode::Enter => return (!f.value.is_empty()).then_some(Action::ModalConfirm),
+        KeyCode::Tab | KeyCode::Down | KeyCode::Up | KeyCode::BackTab => {
+            s.focused_field = match f.focused_field {
+                ProduceFormField::Key => ProduceFormField::Value,
+                ProduceFormField::Value => ProduceFormField::Key,
+            };
+        }
+        KeyCode::Char(c) => match f.focused_field {
+            ProduceFormField::Key => s.key.push(c),
+            ProduceFormField::Value => s.value.push(c),
+        },
+        KeyCode::Backspace => match f.focused_field {
+            ProduceFormField::Key => { s.key.pop(); }
+            ProduceFormField::Value => { s.value.pop(); }
+        },
+        _ => return None,
+    }
+    Some(Action::UpdateProduceForm(s))
+}
+
 pub fn screen_key_binding(screen: &Screen, key: KeyEvent, sidebar_focused: bool) -> Option<Action> {
     if sidebar_focused {
         return match key.code {
@@ -164,7 +189,7 @@ pub fn screen_key_binding(screen: &Screen, key: KeyEvent, sidebar_focused: bool)
             (KeyModifiers::NONE, KeyCode::Char('i')) => Some(Action::RequestViewTopicDetails),
             (KeyModifiers::NONE, KeyCode::Char('n')) => Some(Action::ShowModal(ModalType::TopicCreateForm(Default::default()))),
             (KeyModifiers::NONE, KeyCode::Char('/')) => Some(Action::ShowModal(ModalType::Input {
-                title: "Filter Topics".into(), placeholder: "Enter filter".into(), value: String::new(), action: InputAction::FilterTopics,
+                title: "Filter".into(), placeholder: "".into(), value: String::new(), action: InputAction::FilterTopics,
             })),
             (KeyModifiers::CONTROL, KeyCode::Char('l')) => Some(Action::ClearTopicFilter),
             (KeyModifiers::CONTROL, KeyCode::Char('r')) | (_, KeyCode::F(5)) => Some(Action::FetchTopics),
@@ -175,7 +200,7 @@ pub fn screen_key_binding(screen: &Screen, key: KeyEvent, sidebar_focused: bool)
             KeyCode::Char('m') => Some(Action::ViewTopicMessages(topic_name.clone())),
             KeyCode::Char('d') => Some(Action::ShowModal(ModalType::Confirm {
                 title: "Delete Topic".into(),
-                message: format!("Delete topic '{}'? This cannot be undone.", topic_name),
+                message: format!("Delete '{}'?", topic_name),
                 action: ConfirmAction::DeleteTopic(topic_name.clone()),
             })),
             KeyCode::F(5) => Some(Action::ViewTopicDetails(topic_name.clone())),
@@ -183,10 +208,9 @@ pub fn screen_key_binding(screen: &Screen, key: KeyEvent, sidebar_focused: bool)
         },
         Screen::Messages { topic_name } => match (key.modifiers, key.code) {
             (KeyModifiers::NONE, KeyCode::Char('v') | KeyCode::Enter) => Some(Action::ToggleMessageDetail),
-            (KeyModifiers::NONE, KeyCode::Char('p')) => Some(Action::ShowModal(ModalType::Input {
-                title: "Produce Message".into(), placeholder: "Enter message".into(), value: String::new(),
-                action: InputAction::ProduceMessage { topic: topic_name.clone() },
-            })),
+            (KeyModifiers::NONE, KeyCode::Char('p')) => Some(Action::ShowModal(ModalType::ProduceForm(ProduceFormState {
+                topic: topic_name.clone(), ..Default::default()
+            }))),
             (KeyModifiers::CONTROL, KeyCode::Char('r')) | (_, KeyCode::F(5)) => Some(Action::FetchMessages {
                 topic: topic_name.clone(), offset_mode: OffsetMode::Latest, partition: None,
             }),
@@ -196,7 +220,7 @@ pub fn screen_key_binding(screen: &Screen, key: KeyEvent, sidebar_focused: bool)
         Screen::ConsumerGroups => match (key.modifiers, key.code) {
             (KeyModifiers::NONE, KeyCode::Enter) => Some(Action::Select),
             (KeyModifiers::NONE, KeyCode::Char('/')) => Some(Action::ShowModal(ModalType::Input {
-                title: "Filter Groups".into(), placeholder: "Enter filter".into(), value: String::new(), action: InputAction::FilterConsumerGroups,
+                title: "Filter".into(), placeholder: "".into(), value: String::new(), action: InputAction::FilterConsumerGroups,
             })),
             (KeyModifiers::CONTROL, KeyCode::Char('l')) => Some(Action::ClearConsumerGroupFilter),
             (KeyModifiers::CONTROL, KeyCode::Char('r')) | (_, KeyCode::F(5)) => Some(Action::FetchConsumerGroups),
@@ -207,23 +231,23 @@ pub fn screen_key_binding(screen: &Screen, key: KeyEvent, sidebar_focused: bool)
             KeyCode::F(5) => Some(Action::ViewConsumerGroupDetails(group_id.clone())),
             _ => None,
         },
-        Screen::TopicCreate | Screen::MessageProducer { .. } => match key.code {
-            KeyCode::Esc => Some(Action::GoBack),
+        Screen::Brokers => match (key.modifiers, key.code) {
+            (KeyModifiers::CONTROL, KeyCode::Char('r')) | (_, KeyCode::F(5)) => Some(Action::FetchBrokers),
             _ => None,
         },
     }
 }
 
 pub fn get_help_text(screen: &Screen) -> Vec<(&'static str, &'static str)> {
-    let mut h = vec![("q/Ctrl+C", "Quit"), ("?", "Help"), ("Tab", "Switch panel"), ("Esc", "Back"), ("1-3", "Navigate")];
+    let mut h = vec![("q", "Quit"), ("?", "Help"), ("Tab", "Switch"), ("Esc", "Back")];
     h.extend(match screen {
         Screen::Welcome => vec![("Enter", "Connect"), ("n", "New"), ("d", "Delete")],
-        Screen::Topics => vec![("j/k", "Nav"), ("Enter/m", "Messages"), ("i", "Details"), ("n", "New"), ("/", "Filter")],
-        Screen::Messages { .. } => vec![("j/k", "Navigate"), ("v", "Detail"), ("p", "Produce"), ("Ctrl+R", "Refresh")],
-        Screen::ConsumerGroups => vec![("j/k", "Navigate"), ("Enter", "Details"), ("/", "Filter"), ("Ctrl+R", "Refresh")],
-        Screen::TopicDetails { .. } => vec![("Tab", "Switch"), ("m", "Messages"), ("d", "Delete"), ("F5", "Refresh")],
+        Screen::Topics => vec![("j/k", "Nav"), ("m", "Messages"), ("i", "Details"), ("n", "New"), ("/", "Filter")],
+        Screen::Messages { .. } => vec![("j/k", "Nav"), ("v", "Detail"), ("p", "Produce"), ("F5", "Refresh")],
+        Screen::ConsumerGroups => vec![("j/k", "Nav"), ("Enter", "Details"), ("/", "Filter"), ("F5", "Refresh")],
+        Screen::TopicDetails { .. } => vec![("Tab", "Switch"), ("m", "Messages"), ("d", "Delete")],
         Screen::ConsumerGroupDetails { .. } => vec![("Tab", "Switch"), ("F5", "Refresh")],
-        _ => vec![],
+        Screen::Brokers => vec![("F5", "Refresh")],
     });
     h
 }
