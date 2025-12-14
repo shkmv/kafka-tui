@@ -67,6 +67,8 @@ pub struct ConnectionProfile {
     pub id: Uuid,
     pub name: String,
     pub brokers: String,
+    #[serde(default)]
+    pub consumer_group: Option<String>,
     pub auth: AuthConfig,
     pub created_at: DateTime<Utc>,
     pub last_used: Option<DateTime<Utc>>,
@@ -78,6 +80,7 @@ impl Default for ConnectionProfile {
             id: Uuid::new_v4(),
             name: String::new(),
             brokers: String::new(),
+            consumer_group: None,
             auth: AuthConfig::None,
             created_at: Utc::now(),
             last_used: None,
@@ -395,6 +398,7 @@ pub enum ProduceFormField {
 pub struct ConnectionFormState {
     pub name: String,
     pub brokers: String,
+    pub consumer_group: String,
     pub auth_type: AuthType,
     pub username: String,
     pub password: String,
@@ -406,6 +410,7 @@ pub enum ConnectionFormField {
     #[default]
     Name,
     Brokers,
+    ConsumerGroup,
     AuthType,
     Username,
     Password,

@@ -7,6 +7,9 @@ pub struct KafkaConfig {
     pub brokers: String,
 
     #[serde(default)]
+    pub consumer_group: Option<String>,
+
+    #[serde(default)]
     pub security: SecurityConfig,
 
     #[serde(default = "default_connection_timeout")]
@@ -114,6 +117,7 @@ impl From<ConnectionProfile> for KafkaConfig {
 
         KafkaConfig {
             brokers: profile.brokers,
+            consumer_group: profile.consumer_group,
             security,
             connection_timeout_ms: 30000,
             request_timeout_ms: 60000,

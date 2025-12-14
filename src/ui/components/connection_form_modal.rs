@@ -13,9 +13,9 @@ impl ConnectionFormModal {
     pub fn render(frame: &mut Frame, form_state: &ConnectionFormState) {
         // Dynamic height based on whether credentials are needed
         let height = if form_state.auth_type.requires_credentials() {
-            20
+            24
         } else {
-            14
+            18
         };
         let area = centered_rect_fixed(60, height, frame.area());
 
@@ -39,6 +39,9 @@ impl ConnectionFormModal {
             Constraint::Length(1), // Spacer
             Constraint::Length(1), // Brokers label
             Constraint::Length(1), // Brokers input
+            Constraint::Length(1), // Spacer
+            Constraint::Length(1), // Consumer Group label
+            Constraint::Length(1), // Consumer Group input
             Constraint::Length(1), // Spacer
             Constraint::Length(1), // Auth type label
             Constraint::Length(1), // Auth type selector
@@ -98,6 +101,23 @@ impl ConnectionFormModal {
         let brokers_display = Self::format_input(&form_state.brokers, brokers_focused, "localhost:9092");
         let brokers_input = Paragraph::new(brokers_display).style(THEME.input_style(brokers_focused));
         frame.render_widget(brokers_input, chunks[idx]);
+        idx += 2; // skip spacer
+
+        // Consumer Group label
+        let cg_label_style = if form_state.focused_field == ConnectionFormField::ConsumerGroup {
+            THEME.title_style()
+        } else {
+            THEME.muted_style()
+        };
+        let cg_label = Paragraph::new("Consumer Group (optional):").style(cg_label_style);
+        frame.render_widget(cg_label, chunks[idx]);
+        idx += 1;
+
+        // Consumer Group input
+        let cg_focused = form_state.focused_field == ConnectionFormField::ConsumerGroup;
+        let cg_display = Self::format_input(&form_state.consumer_group, cg_focused, "kafka-tui");
+        let cg_input = Paragraph::new(cg_display).style(THEME.input_style(cg_focused));
+        frame.render_widget(cg_input, chunks[idx]);
         idx += 2; // skip spacer
 
         // Auth type label

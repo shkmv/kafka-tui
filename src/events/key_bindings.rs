@@ -6,6 +6,7 @@ use crate::app::state::*;
 pub fn global_key_binding(key: KeyEvent) -> Option<Action> {
     match (key.modifiers, key.code) {
         (KeyModifiers::CONTROL, KeyCode::Char('c' | 'q')) => Some(Action::Quit),
+        (KeyModifiers::NONE, KeyCode::Char('q')) => Some(Action::Quit),
         (KeyModifiers::NONE, KeyCode::Char('?')) | (_, KeyCode::F(1)) => Some(Action::ShowHelp),
         (KeyModifiers::NONE, KeyCode::Tab) => Some(Action::FocusContent),
         (KeyModifiers::SHIFT, KeyCode::BackTab) => Some(Action::FocusSidebar),
@@ -67,6 +68,7 @@ fn connection_form_key(key: KeyEvent, f: &ConnectionFormState) -> Option<Action>
         KeyCode::Char(c) => match f.focused_field {
             ConnectionFormField::Name => s.name.push(c),
             ConnectionFormField::Brokers => s.brokers.push(c),
+            ConnectionFormField::ConsumerGroup => s.consumer_group.push(c),
             ConnectionFormField::Username => s.username.push(c),
             ConnectionFormField::Password => s.password.push(c),
             _ => return None,
@@ -74,6 +76,7 @@ fn connection_form_key(key: KeyEvent, f: &ConnectionFormState) -> Option<Action>
         KeyCode::Backspace => match f.focused_field {
             ConnectionFormField::Name => { s.name.pop(); }
             ConnectionFormField::Brokers => { s.brokers.pop(); }
+            ConnectionFormField::ConsumerGroup => { s.consumer_group.pop(); }
             ConnectionFormField::Username => { s.username.pop(); }
             ConnectionFormField::Password => { s.password.pop(); }
             _ => return None,
@@ -86,7 +89,8 @@ fn connection_form_key(key: KeyEvent, f: &ConnectionFormState) -> Option<Action>
 fn conn_next(f: &ConnectionFormField, auth: &AuthType) -> ConnectionFormField {
     match f {
         ConnectionFormField::Name => ConnectionFormField::Brokers,
-        ConnectionFormField::Brokers => ConnectionFormField::AuthType,
+        ConnectionFormField::Brokers => ConnectionFormField::ConsumerGroup,
+        ConnectionFormField::ConsumerGroup => ConnectionFormField::AuthType,
         ConnectionFormField::AuthType => if auth.requires_credentials() { ConnectionFormField::Username } else { ConnectionFormField::Name },
         ConnectionFormField::Username => ConnectionFormField::Password,
         ConnectionFormField::Password => ConnectionFormField::Name,
@@ -97,7 +101,8 @@ fn conn_prev(f: &ConnectionFormField, auth: &AuthType) -> ConnectionFormField {
     match f {
         ConnectionFormField::Name => if auth.requires_credentials() { ConnectionFormField::Password } else { ConnectionFormField::AuthType },
         ConnectionFormField::Brokers => ConnectionFormField::Name,
-        ConnectionFormField::AuthType => ConnectionFormField::Brokers,
+        ConnectionFormField::ConsumerGroup => ConnectionFormField::Brokers,
+        ConnectionFormField::AuthType => ConnectionFormField::ConsumerGroup,
         ConnectionFormField::Username => ConnectionFormField::AuthType,
         ConnectionFormField::Password => ConnectionFormField::Username,
     }

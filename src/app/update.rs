@@ -464,7 +464,16 @@ fn handle_modal_confirm(state: &mut AppState) -> Command {
                 AuthType::SaslScram256 => AuthConfig::SaslScram256 { username: f.username, password: f.password },
                 AuthType::SaslScram512 => AuthConfig::SaslScram512 { username: f.username, password: f.password },
             };
-            let profile = ConnectionProfile { id: Uuid::new_v4(), name: f.name, brokers: f.brokers, auth, created_at: Utc::now(), last_used: None };
+            let consumer_group = if f.consumer_group.is_empty() { None } else { Some(f.consumer_group) };
+            let profile = ConnectionProfile {
+                id: Uuid::new_v4(),
+                name: f.name,
+                brokers: f.brokers,
+                consumer_group,
+                auth,
+                created_at: Utc::now(),
+                last_used: None,
+            };
             state.connection.status = ConnectionStatus::Connecting;
             state.connection.active_profile = Some(profile.clone());
             Command::ConnectToKafka(profile)
