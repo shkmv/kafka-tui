@@ -220,7 +220,7 @@ fn purge_topic_form_key(key: KeyEvent, f: &PurgeTopicFormState) -> Option<Action
     match key.code {
         KeyCode::Esc => return Some(Action::ModalCancel),
         KeyCode::Enter => return Some(Action::ModalConfirm),
-        KeyCode::Tab | KeyCode::Up | KeyCode::Down => s.purge_all = !s.purge_all,
+        KeyCode::Tab | KeyCode::Up | KeyCode::Down | KeyCode::Char(' ') => s.purge_all = !s.purge_all,
         KeyCode::Char(c) if !s.purge_all && c.is_ascii_digit() => s.offset.push(c),
         KeyCode::Backspace if !s.purge_all => { s.offset.pop(); }
         _ => return None,
