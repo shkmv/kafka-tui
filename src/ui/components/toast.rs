@@ -3,7 +3,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
 };
 
-use crate::app::state::{ToastLevel, ToastMessage};
+use crate::app::state::{Level, ToastMessage};
 use crate::ui::theme::THEME;
 
 pub struct Toast;
@@ -44,10 +44,10 @@ impl Toast {
         frame.render_widget(Clear, area);
 
         let (icon, border_style) = match toast.level {
-            ToastLevel::Info => ("", THEME.info_style()),
-            ToastLevel::Success => ("", THEME.success_style()),
-            ToastLevel::Warning => ("", THEME.warning_style()),
-            ToastLevel::Error => ("", THEME.error_style()),
+            Level::Info => ("", THEME.info_style()),
+            Level::Success => ("", THEME.success_style()),
+            Level::Warning => ("", THEME.warning_style()),
+            Level::Error => ("", THEME.error_style()),
         };
 
         let block = Block::default()

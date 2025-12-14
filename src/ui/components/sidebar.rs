@@ -23,6 +23,7 @@ impl Sidebar {
                     SidebarItem::Topics => "",
                     SidebarItem::ConsumerGroups => "󰡨",
                     SidebarItem::Brokers => "",
+                    SidebarItem::Logs => "",
                 };
 
                 let is_selected = state.ui_state.selected_sidebar_item == *item;

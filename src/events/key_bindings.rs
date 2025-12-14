@@ -14,6 +14,7 @@ pub fn global_key_binding(key: KeyEvent) -> Option<Action> {
         (KeyModifiers::NONE, KeyCode::Char('1')) => Some(Action::SelectSidebarItem(SidebarItem::Topics)),
         (KeyModifiers::NONE, KeyCode::Char('2')) => Some(Action::SelectSidebarItem(SidebarItem::ConsumerGroups)),
         (KeyModifiers::NONE, KeyCode::Char('3')) => Some(Action::SelectSidebarItem(SidebarItem::Brokers)),
+        (KeyModifiers::NONE, KeyCode::Char('4')) => Some(Action::SelectSidebarItem(SidebarItem::Logs)),
         _ => None,
     }
 }
@@ -319,6 +320,11 @@ pub fn screen_key_binding(screen: &Screen, key: KeyEvent, sidebar_focused: bool)
             (KeyModifiers::CONTROL, KeyCode::Char('r')) | (_, KeyCode::F(5)) => Some(Action::FetchBrokers),
             _ => None,
         },
+        Screen::Logs => match (key.modifiers, key.code) {
+            (KeyModifiers::NONE, KeyCode::Char('c')) => Some(Action::ClearLogs),
+            (KeyModifiers::NONE, KeyCode::Char('f') | KeyCode::Char('/')) => Some(Action::CycleLogFilter),
+            _ => None,
+        },
     }
 }
 
@@ -332,6 +338,7 @@ pub fn get_help_text(screen: &Screen) -> Vec<(&'static str, &'static str)> {
         Screen::TopicDetails { .. } => vec![("Tab", "Switch"), ("m", "Messages"), ("d", "Delete"), ("p", "Add Parts"), ("e", "Config"), ("x", "Purge")],
         Screen::ConsumerGroupDetails { .. } => vec![("Tab", "Switch"), ("F5", "Refresh")],
         Screen::Brokers => vec![("F5", "Refresh")],
+        Screen::Logs => vec![("j/k", "Nav"), ("c", "Clear"), ("f", "Filter")],
     });
     h
 }

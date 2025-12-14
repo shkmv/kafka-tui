@@ -1,6 +1,6 @@
 use ratatui::style::{Color, Modifier, Style};
 
-use crate::app::state::ToastLevel;
+use crate::app::state::Level;
 
 /// Catppuccin Mocha theme
 pub struct Theme {
@@ -93,12 +93,12 @@ impl Theme {
         Style::default().fg(self.warning).add_modifier(Modifier::ITALIC)
     }
 
-    pub fn toast_style(&self, level: &ToastLevel) -> Style {
+    pub fn toast_style(&self, level: &Level) -> Style {
         Style::default().fg(match level {
-            ToastLevel::Info => self.info,
-            ToastLevel::Success => self.success,
-            ToastLevel::Warning => self.warning,
-            ToastLevel::Error => self.error,
+            Level::Info => self.info,
+            Level::Success => self.success,
+            Level::Warning => self.warning,
+            Level::Error => self.error,
         })
     }
 

@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use crate::app::state::{
     AddPartitionsFormState, AlterConfigFormState, BrokerInfo, ConnectionFormState, ConnectionProfile,
-    ConsumerGroupDetail, ConsumerGroupInfo, KafkaMessage, ModalType, OffsetMode, ProduceFormState,
-    PurgeTopicFormState, Screen, SidebarItem, ToastLevel, TopicCreateFormState, TopicDetail,
+    ConsumerGroupDetail, ConsumerGroupInfo, KafkaMessage, Level, ModalType, OffsetMode, ProduceFormState,
+    PurgeTopicFormState, Screen, SidebarItem, TopicCreateFormState, TopicDetail,
     TopicInfo, TopicSortField,
 };
 
@@ -101,6 +101,11 @@ pub enum Action {
     BrokersFetched { brokers: Vec<BrokerInfo>, cluster_id: Option<String> },
     BrokersFetchFailed(String),
 
+    // Logs
+    ClearLogs,
+    CycleLogFilter,
+    SetLogFilter(Option<Level>),
+
     // UI
     ShowHelp,
     HideHelp,
@@ -112,7 +117,7 @@ pub enum Action {
     UpdateConnectionForm(ConnectionFormState),
     UpdateTopicCreateForm(TopicCreateFormState),
     UpdateProduceForm(ProduceFormState),
-    ShowToast { message: String, level: ToastLevel },
+    ShowToast { message: String, level: Level },
     DismissToast(uuid::Uuid),
 
     // Navigation

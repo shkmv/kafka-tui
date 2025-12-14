@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -12,6 +12,7 @@ pub struct AppState {
     pub messages_state: MessagesState,
     pub consumer_groups_state: ConsumerGroupsState,
     pub brokers_state: BrokersState,
+    pub logs_state: LogsState,
     pub ui_state: UiState,
     pub running: bool,
     pub last_error: Option<String>,
@@ -27,6 +28,7 @@ pub enum Screen {
     ConsumerGroups,
     ConsumerGroupDetails { group_id: String },
     Brokers,
+    Logs,
 }
 
 impl std::fmt::Display for Screen {
@@ -39,6 +41,7 @@ impl std::fmt::Display for Screen {
             Self::ConsumerGroups => write!(f, "Consumer Groups"),
             Self::ConsumerGroupDetails { group_id } => write!(f, "Group: {}", group_id),
             Self::Brokers => write!(f, "Brokers"),
+            Self::Logs => write!(f, "Logs"),
         }
     }
 }
@@ -328,6 +331,57 @@ pub struct BrokersState {
     pub cluster_id: Option<String>,
 }
 
+// === Logs ===
+
+const MAX_LOG_ENTRIES: usize = 1000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Level {
+    Info,
+    Success,
+    Warning,
+    Error,
+}
+
+#[derive(Debug, Clone)]
+pub struct LogEntry {
+    pub level: Level,
+    pub message: String,
+    pub timestamp: DateTime<Utc>,
+}
+
+#[derive(Debug, Default)]
+pub struct LogsState {
+    pub entries: VecDeque<LogEntry>,
+    pub selected_index: usize,
+    pub filter_level: Option<Level>,
+}
+
+impl LogsState {
+    pub fn add(&mut self, level: Level, message: String) {
+        self.entries.push_front(LogEntry {
+            level,
+            message,
+            timestamp: Utc::now(),
+        });
+        if self.entries.len() > MAX_LOG_ENTRIES {
+            self.entries.pop_back();
+        }
+    }
+
+    pub fn filtered_entries(&self) -> Vec<&LogEntry> {
+        match self.filter_level {
+            Some(level) => self.entries.iter().filter(|e| e.level == level).collect(),
+            None => self.entries.iter().collect(),
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.selected_index = 0;
+    }
+}
+
 // === UI ===
 
 #[derive(Debug, Default)]
@@ -345,16 +399,18 @@ pub enum SidebarItem {
     Topics,
     ConsumerGroups,
     Brokers,
+    Logs,
 }
 
 impl SidebarItem {
-    pub const ALL: [SidebarItem; 3] = [Self::Topics, Self::ConsumerGroups, Self::Brokers];
+    pub const ALL: [SidebarItem; 4] = [Self::Topics, Self::ConsumerGroups, Self::Brokers, Self::Logs];
 
     pub fn to_screen(&self) -> Screen {
         match self {
             Self::Topics => Screen::Topics,
             Self::ConsumerGroups => Screen::ConsumerGroups,
             Self::Brokers => Screen::Brokers,
+            Self::Logs => Screen::Logs,
         }
     }
 
@@ -363,6 +419,7 @@ impl SidebarItem {
             Self::Topics => "Topics",
             Self::ConsumerGroups => "Consumer Groups",
             Self::Brokers => "Brokers",
+            Self::Logs => "Logs",
         }
     }
 }
@@ -504,16 +561,8 @@ pub enum InputAction {
 pub struct ToastMessage {
     pub id: Uuid,
     pub message: String,
-    pub level: ToastLevel,
+    pub level: Level,
     pub created_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ToastLevel {
-    Info,
-    Success,
-    Warning,
-    Error,
 }
 
 // === Topic Management Forms ===

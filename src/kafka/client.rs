@@ -600,7 +600,7 @@ impl KafkaClient {
             rdsys::rd_kafka_DeleteRecords_destroy(del_records);
             rdsys::rd_kafka_AdminOptions_destroy(opts);
 
-            let event = rdsys::rd_kafka_queue_poll(queue, req_timeout_ms as i32);
+            let event = rdsys::rd_kafka_queue_poll(queue, req_timeout_ms);
             if event.is_null() {
                 rdsys::rd_kafka_queue_destroy(queue);
                 return Err(AppError::Kafka("DeleteRecords timed out".into()));

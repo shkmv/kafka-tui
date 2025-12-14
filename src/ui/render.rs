@@ -10,6 +10,7 @@ use crate::ui::layout::{welcome_layout, AppLayout};
 use crate::ui::screens::{
     brokers::BrokersScreen,
     consumer_groups::{ConsumerGroupDetailsScreen, ConsumerGroupsListScreen},
+    logs::LogsScreen,
     messages::MessageBrowserScreen,
     topics::{TopicDetailsScreen, TopicsListScreen},
     welcome::WelcomeScreen,
@@ -47,6 +48,7 @@ fn render_content(frame: &mut Frame, area: Rect, state: &AppState) {
         Screen::ConsumerGroups => ConsumerGroupsListScreen::render(frame, area, state),
         Screen::ConsumerGroupDetails { group_id } => ConsumerGroupDetailsScreen::render(frame, area, state, group_id),
         Screen::Brokers => BrokersScreen::render(frame, area, state),
+        Screen::Logs => LogsScreen::render(frame, area, state),
     }
 }
 

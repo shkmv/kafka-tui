@@ -7,7 +7,7 @@ use ratatui::prelude::*;
 use tokio::sync::mpsc;
 
 use crate::app::actions::{Action, Command};
-use crate::app::state::{AppState, ToastLevel};
+use crate::app::state::{AppState, Level};
 use crate::app::update::update;
 use crate::events::handler::EventHandler;
 use crate::kafka::config::KafkaConfig;
@@ -166,7 +166,7 @@ impl App {
                 match connections::load_connections() {
                     Ok(p) => { self.tx.send(Action::ConnectionsLoaded(p)).ok(); }
                     Err(e) => {
-                        self.tx.send(Action::ShowToast { message: e.to_string(), level: ToastLevel::Error }).ok();
+                        self.tx.send(Action::ShowToast { message: e.to_string(), level: Level::Error }).ok();
                         self.tx.send(Action::ConnectionsLoaded(vec![])).ok();
                     }
                 }
@@ -174,14 +174,14 @@ impl App {
 
             Command::SaveConnectionProfile(p) => {
                 if let Err(e) = connections::save_connection(&p) {
-                    self.tx.send(Action::ShowToast { message: e.to_string(), level: ToastLevel::Error }).ok();
+                    self.tx.send(Action::ShowToast { message: e.to_string(), level: Level::Error }).ok();
                 }
             }
 
             Command::DeleteConnectionProfile(id) => {
                 match connections::delete_connection(id) {
                     Ok(_) => { self.tx.send(Action::ConnectionDeleted(id)).ok(); }
-                    Err(e) => { self.tx.send(Action::ShowToast { message: e.to_string(), level: ToastLevel::Error }).ok(); }
+                    Err(e) => { self.tx.send(Action::ShowToast { message: e.to_string(), level: Level::Error }).ok(); }
                 }
             }
 
@@ -228,7 +228,7 @@ impl App {
             None => {
                 self.tx.send(Action::ShowToast {
                     message: "Not connected to Kafka".into(),
-                    level: ToastLevel::Error,
+                    level: Level::Error,
                 }).ok();
             }
         }
