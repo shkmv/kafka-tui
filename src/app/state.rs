@@ -371,6 +371,9 @@ pub enum ModalType {
     ConnectionForm(ConnectionFormState),
     TopicCreateForm(TopicCreateFormState),
     ProduceForm(ProduceFormState),
+    AddPartitionsForm(AddPartitionsFormState),
+    AlterConfigForm(AlterConfigFormState),
+    PurgeTopicForm(PurgeTopicFormState),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -506,4 +509,68 @@ pub enum ToastLevel {
     Success,
     Warning,
     Error,
+}
+
+// === Topic Management Forms ===
+
+#[derive(Debug, Clone)]
+pub struct AddPartitionsFormState {
+    pub topic: String,
+    pub current_count: i32,
+    pub new_count: String,
+}
+
+impl AddPartitionsFormState {
+    pub fn new(topic: String, current_count: i32) -> Self {
+        Self {
+            topic,
+            current_count,
+            new_count: (current_count + 1).to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AlterConfigFormState {
+    pub topic: String,
+    pub configs: Vec<(String, String, bool)>, // (key, value, modified)
+    pub selected_index: usize,
+    pub editing: bool,
+    pub edit_value: String,
+}
+
+impl AlterConfigFormState {
+    pub fn new(topic: String, configs: Vec<(String, String)>) -> Self {
+        Self {
+            topic,
+            configs: configs.into_iter().map(|(k, v)| (k, v, false)).collect(),
+            selected_index: 0,
+            editing: false,
+            edit_value: String::new(),
+        }
+    }
+
+    pub fn modified_configs(&self) -> Vec<(String, String)> {
+        self.configs.iter()
+            .filter(|(_, _, modified)| *modified)
+            .map(|(k, v, _)| (k.clone(), v.clone()))
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PurgeTopicFormState {
+    pub topic: String,
+    pub offset: String,
+    pub purge_all: bool,
+}
+
+impl PurgeTopicFormState {
+    pub fn new(topic: String) -> Self {
+        Self {
+            topic,
+            offset: String::new(),
+            purge_all: true,
+        }
+    }
 }

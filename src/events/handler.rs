@@ -1,7 +1,9 @@
-use crossterm::event::{Event, KeyEvent, KeyEventKind};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
 
 use crate::app::actions::Action;
-use crate::app::state::AppState;
+use crate::app::state::{
+    AddPartitionsFormState, AlterConfigFormState, AppState, ModalType, PurgeTopicFormState, Screen,
+};
 use crate::events::key_bindings::{
     global_key_binding, help_key_binding, modal_key_binding, screen_key_binding,
 };
@@ -43,8 +45,49 @@ impl EventHandler {
             return Some(action);
         }
 
-        // 4. Try screen-specific key bindings
+        // 4. Handle state-dependent keys for TopicDetails
+        if let Some(action) = Self::topic_details_keys(key, state) {
+            return Some(action);
+        }
+
+        // 5. Try screen-specific key bindings
         screen_key_binding(&state.active_screen, key, state.ui_state.sidebar_focused)
+    }
+
+    fn topic_details_keys(key: KeyEvent, state: &AppState) -> Option<Action> {
+        let Screen::TopicDetails { topic_name } = &state.active_screen else {
+            return None;
+        };
+
+        match key.code {
+            KeyCode::Char('p') => {
+                // Add partitions - need current partition count
+                let current_count = state.topics_state.current_detail
+                    .as_ref()
+                    .map(|d| d.partitions.len() as i32)
+                    .unwrap_or(1);
+                Some(Action::ShowModal(ModalType::AddPartitionsForm(
+                    AddPartitionsFormState::new(topic_name.clone(), current_count)
+                )))
+            }
+            KeyCode::Char('e') => {
+                // Edit config - need current config
+                let configs = state.topics_state.current_detail
+                    .as_ref()
+                    .map(|d| d.config.clone())
+                    .unwrap_or_default();
+                Some(Action::ShowModal(ModalType::AlterConfigForm(
+                    AlterConfigFormState::new(topic_name.clone(), configs)
+                )))
+            }
+            KeyCode::Char('x') => {
+                // Purge topic
+                Some(Action::ShowModal(ModalType::PurgeTopicForm(
+                    PurgeTopicFormState::new(topic_name.clone())
+                )))
+            }
+            _ => None,
+        }
     }
 }
 

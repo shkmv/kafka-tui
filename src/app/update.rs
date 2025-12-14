@@ -203,6 +203,61 @@ pub fn update(state: &mut AppState, action: Action) -> Command {
             }
         }
 
+        // Topic Management
+        Action::AddPartitions { topic, new_count } => Command::AddTopicPartitions { topic, new_count },
+
+        Action::PartitionsAdded(topic) => {
+            state.ui_state.active_modal = None;
+            toast(state, &format!("Partitions added to '{}'", topic), ToastLevel::Success);
+            Command::FetchTopicDetails(topic)
+        }
+
+        Action::PartitionsAddFailed(e) => {
+            toast(state, &format!("Add partitions failed: {}", e), ToastLevel::Error);
+            Command::None
+        }
+
+        Action::AlterTopicConfig { topic, configs } => Command::AlterKafkaTopicConfig { topic, configs },
+
+        Action::TopicConfigAltered(topic) => {
+            state.ui_state.active_modal = None;
+            toast(state, &format!("Config updated for '{}'", topic), ToastLevel::Success);
+            Command::FetchTopicDetails(topic)
+        }
+
+        Action::TopicConfigAlterFailed(e) => {
+            toast(state, &format!("Alter config failed: {}", e), ToastLevel::Error);
+            Command::None
+        }
+
+        Action::PurgeTopic { topic, before_offset } => Command::PurgeKafkaTopic { topic, before_offset },
+
+        Action::TopicPurged(topic) => {
+            state.ui_state.active_modal = None;
+            toast(state, &format!("Messages purged from '{}'", topic), ToastLevel::Success);
+            Command::FetchTopicDetails(topic)
+        }
+
+        Action::TopicPurgeFailed(e) => {
+            toast(state, &format!("Purge failed: {}", e), ToastLevel::Error);
+            Command::None
+        }
+
+        Action::UpdateAddPartitionsForm(f) => {
+            if let Some(ModalType::AddPartitionsForm(s)) = &mut state.ui_state.active_modal { *s = f; }
+            Command::None
+        }
+
+        Action::UpdateAlterConfigForm(f) => {
+            if let Some(ModalType::AlterConfigForm(s)) = &mut state.ui_state.active_modal { *s = f; }
+            Command::None
+        }
+
+        Action::UpdatePurgeTopicForm(f) => {
+            if let Some(ModalType::PurgeTopicForm(s)) = &mut state.ui_state.active_modal { *s = f; }
+            Command::None
+        }
+
         // Messages
         Action::FetchMessages { topic, offset_mode, partition } => {
             state.messages_state.loading = true;
@@ -425,6 +480,26 @@ fn handle_modal_confirm(state: &mut AppState) -> Command {
             value: f.value,
             headers: Default::default(),
         },
+        ModalType::AddPartitionsForm(f) => {
+            let new_count = f.new_count.parse().unwrap_or(f.current_count);
+            if new_count > f.current_count {
+                Command::AddTopicPartitions { topic: f.topic, new_count }
+            } else {
+                Command::None
+            }
+        }
+        ModalType::AlterConfigForm(f) => {
+            let configs = f.modified_configs();
+            if configs.is_empty() {
+                Command::None
+            } else {
+                Command::AlterKafkaTopicConfig { topic: f.topic, configs }
+            }
+        }
+        ModalType::PurgeTopicForm(f) => {
+            let offset = if f.purge_all { i64::MAX } else { f.offset.parse().unwrap_or(0) };
+            Command::PurgeKafkaTopic { topic: f.topic, before_offset: offset }
+        }
     }
 }
 

@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
 use crate::app::state::{
-    BrokerInfo, ConnectionFormState, ConnectionProfile, ConsumerGroupDetail, ConsumerGroupInfo,
-    KafkaMessage, ModalType, OffsetMode, ProduceFormState, Screen, SidebarItem, ToastLevel,
-    TopicCreateFormState, TopicDetail, TopicInfo, TopicSortField,
+    AddPartitionsFormState, AlterConfigFormState, BrokerInfo, ConnectionFormState, ConnectionProfile,
+    ConsumerGroupDetail, ConsumerGroupInfo, KafkaMessage, ModalType, OffsetMode, ProduceFormState,
+    PurgeTopicFormState, Screen, SidebarItem, ToastLevel, TopicCreateFormState, TopicDetail,
+    TopicInfo, TopicSortField,
 };
 
 #[derive(Debug, Clone)]
@@ -52,6 +53,20 @@ pub enum Action {
     TopicDetailsFetchFailed(String),
     SwitchTopicDetailTab,
     ViewTopicMessages(String),
+
+    // Topic Management
+    AddPartitions { topic: String, new_count: i32 },
+    PartitionsAdded(String),
+    PartitionsAddFailed(String),
+    AlterTopicConfig { topic: String, configs: Vec<(String, String)> },
+    TopicConfigAltered(String),
+    TopicConfigAlterFailed(String),
+    PurgeTopic { topic: String, before_offset: i64 },
+    TopicPurged(String),
+    TopicPurgeFailed(String),
+    UpdateAddPartitionsForm(AddPartitionsFormState),
+    UpdateAlterConfigForm(AlterConfigFormState),
+    UpdatePurgeTopicForm(PurgeTopicFormState),
 
     // Messages
     FetchMessages { topic: String, offset_mode: OffsetMode, partition: Option<i32> },
@@ -132,6 +147,11 @@ pub enum Command {
     FetchConsumerGroupList,
     FetchConsumerGroupDetails(String),
     FetchBrokerList,
+
+    // Topic Management
+    AddTopicPartitions { topic: String, new_count: i32 },
+    AlterKafkaTopicConfig { topic: String, configs: Vec<(String, String)> },
+    PurgeKafkaTopic { topic: String, before_offset: i64 },
 
     // Storage
     LoadConnectionProfiles,

@@ -185,6 +185,32 @@ impl App {
                 }
             }
 
+            Command::AddTopicPartitions { topic, new_count } => {
+                self.spawn_kafka(move |c, tx| async move {
+                    match c.add_partitions(&topic, new_count).await {
+                        Ok(_) => { tx.send(Action::PartitionsAdded(topic)).ok(); }
+                        Err(e) => { tx.send(Action::PartitionsAddFailed(e.to_string())).ok(); }
+                    }
+                });
+            }
+
+            Command::AlterKafkaTopicConfig { topic, configs } => {
+                self.spawn_kafka(move |c, tx| async move {
+                    match c.alter_topic_config(&topic, &configs).await {
+                        Ok(_) => { tx.send(Action::TopicConfigAltered(topic)).ok(); }
+                        Err(e) => { tx.send(Action::TopicConfigAlterFailed(e.to_string())).ok(); }
+                    }
+                });
+            }
+
+            Command::PurgeKafkaTopic { topic, before_offset } => {
+                self.spawn_kafka(move |c, tx| async move {
+                    match c.delete_records(&topic, before_offset).await {
+                        Ok(_) => { tx.send(Action::TopicPurged(topic)).ok(); }
+                        Err(e) => { tx.send(Action::TopicPurgeFailed(e.to_string())).ok(); }
+                    }
+                });
+            }
         }
     }
 

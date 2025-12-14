@@ -2,8 +2,9 @@ use ratatui::prelude::*;
 
 use crate::app::state::{AppState, ModalType, Screen};
 use crate::ui::components::{
-    ConfirmModal, ConnectionFormModal, Header, HelpModal, InputModal,
-    ProduceFormModal, Sidebar, StatusBar, Toast, TopicCreateFormModal,
+    AddPartitionsFormModal, AlterConfigFormModal, ConfirmModal, ConnectionFormModal,
+    Header, HelpModal, InputModal, ProduceFormModal, PurgeTopicFormModal, Sidebar,
+    StatusBar, Toast, TopicCreateFormModal,
 };
 use crate::ui::layout::{welcome_layout, AppLayout};
 use crate::ui::screens::{
@@ -62,6 +63,9 @@ fn render_overlays(frame: &mut Frame, state: &AppState) {
             ModalType::ConnectionForm(f) => ConnectionFormModal::render(frame, f),
             ModalType::TopicCreateForm(f) => TopicCreateFormModal::render(frame, f),
             ModalType::ProduceForm(f) => ProduceFormModal::render(frame, f),
+            ModalType::AddPartitionsForm(f) => AddPartitionsFormModal::render(frame, f),
+            ModalType::AlterConfigForm(f) => AlterConfigFormModal::render(frame, f),
+            ModalType::PurgeTopicForm(f) => PurgeTopicFormModal::render(frame, f),
         }
     }
 

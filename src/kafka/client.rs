@@ -1,8 +1,9 @@
 use std::collections::HashMap;
+use std::ffi::CStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
+use rdkafka::admin::{AdminClient, AdminOptions, AlterConfig, NewPartitions, NewTopic, ResourceSpecifier, TopicReplication};
 use rdkafka::client::ClientContext;
 use rdkafka::config::{ClientConfig, RDKafkaLogLevel};
 use rdkafka::consumer::{BaseConsumer, Consumer, ConsumerContext};
@@ -477,5 +478,184 @@ impl KafkaClient {
 
     pub fn brokers(&self) -> &str {
         &self.config.brokers
+    }
+
+    /// Increase the number of partitions for a topic
+    pub async fn add_partitions(&self, topic: &str, new_count: i32) -> AppResult<()> {
+        let new_count: usize = usize::try_from(new_count)
+            .map_err(|_| AppError::Kafka("Partition count must be >= 0".into()))?;
+        let partitions = NewPartitions::new(topic, new_count);
+        let opts = AdminOptions::new().operation_timeout(Some(Duration::from_secs(30)));
+
+        let results = self.admin.create_partitions(&[partitions], &opts).await
+            .map_err(|e| AppError::Kafka(format!("Add partitions failed: {}", e)))?;
+
+        for r in results {
+            if let Err((_, e)) = r {
+                return Err(AppError::Kafka(format!("Add partitions failed: {:?}", e)));
+            }
+        }
+        Ok(())
+    }
+
+    /// Alter topic configuration
+    pub async fn alter_topic_config(&self, topic: &str, configs: &[(String, String)]) -> AppResult<()> {
+        // Build AlterConfig with all entries
+        // We need configs to live long enough, so we reference the input slice directly
+        let resource = ResourceSpecifier::Topic(topic);
+        let alter_config = configs.iter().fold(
+            AlterConfig::new(resource),
+            |acc, (k, v)| acc.set(k, v)
+        );
+
+        let opts = AdminOptions::new().operation_timeout(Some(Duration::from_secs(30)));
+
+        let results = self.admin.alter_configs(&[alter_config], &opts).await
+            .map_err(|e| AppError::Kafka(format!("Alter config failed: {}", e)))?;
+
+        for r in results {
+            if let Err((_, err)) = r {
+                return Err(AppError::Kafka(format!("Alter config failed: {:?}", err)));
+            }
+        }
+        Ok(())
+    }
+
+    /// Delete records (purge) from a topic up to specified offsets
+    pub async fn delete_records(&self, topic: &str, before_offset: i64) -> AppResult<()> {
+        if before_offset < 0 {
+            return Err(AppError::Kafka("Offset must be >= 0".into()));
+        }
+
+        let metadata = self.consumer
+            .fetch_metadata(Some(topic), Duration::from_secs(10))
+            .map_err(|e| AppError::Kafka(format!("Metadata fetch: {}", e)))?;
+
+        let topic_meta = metadata.topics().iter()
+            .find(|t| t.name() == topic)
+            .ok_or_else(|| AppError::Kafka("Topic not found".into()))?;
+
+        let mut tpl = TopicPartitionList::new();
+        for p in topic_meta.partitions() {
+            let (_, high) = self.consumer
+                .fetch_watermarks(topic, p.id(), Duration::from_secs(5))
+                .map_err(|e| AppError::Kafka(format!("Fetch watermarks: {}", e)))?;
+
+            let offset = before_offset.min(high);
+            tpl.add_partition_offset(topic, p.id(), rdkafka::Offset::Offset(offset))
+                .map_err(|e| AppError::Kafka(format!("Set offset: {}", e)))?;
+        }
+
+        let client_ptr = self.consumer.client().native_ptr() as usize;
+        tokio::task::spawn_blocking(move || unsafe {
+            use rdkafka::bindings as rdsys;
+            use rdkafka::bindings::rd_kafka_admin_op_t;
+
+            let client_ptr = client_ptr as *mut rdsys::rd_kafka_t;
+            let queue = rdsys::rd_kafka_queue_new(client_ptr);
+            if queue.is_null() {
+                return Err(AppError::Kafka("Failed to create admin result queue".into()));
+            }
+
+            let mut errstr = [0i8; 512];
+            let opts = rdsys::rd_kafka_AdminOptions_new(
+                client_ptr,
+                rd_kafka_admin_op_t::RD_KAFKA_ADMIN_OP_DELETERECORDS,
+            );
+            if opts.is_null() {
+                rdsys::rd_kafka_queue_destroy(queue);
+                return Err(AppError::Kafka("Failed to create admin options".into()));
+            }
+
+            let req_timeout_ms = 30_000;
+            if rdsys::rd_kafka_AdminOptions_set_request_timeout(
+                opts,
+                req_timeout_ms,
+                errstr.as_mut_ptr(),
+                errstr.len(),
+            ) != rdsys::rd_kafka_resp_err_t::RD_KAFKA_RESP_ERR_NO_ERROR
+            {
+                let msg = CStr::from_ptr(errstr.as_ptr()).to_string_lossy().into_owned();
+                rdsys::rd_kafka_AdminOptions_destroy(opts);
+                rdsys::rd_kafka_queue_destroy(queue);
+                return Err(AppError::Kafka(format!("Failed to set timeout: {}", msg)));
+            }
+
+            let del_records = rdsys::rd_kafka_DeleteRecords_new(tpl.ptr());
+            if del_records.is_null() {
+                rdsys::rd_kafka_AdminOptions_destroy(opts);
+                rdsys::rd_kafka_queue_destroy(queue);
+                return Err(AppError::Kafka("Failed to create DeleteRecords request".into()));
+            }
+
+            let mut del_records_arr = [del_records];
+            rdsys::rd_kafka_DeleteRecords(
+                client_ptr,
+                del_records_arr.as_mut_ptr(),
+                del_records_arr.len(),
+                opts,
+                queue,
+            );
+
+            rdsys::rd_kafka_DeleteRecords_destroy(del_records);
+            rdsys::rd_kafka_AdminOptions_destroy(opts);
+
+            let event = rdsys::rd_kafka_queue_poll(queue, req_timeout_ms as i32);
+            if event.is_null() {
+                rdsys::rd_kafka_queue_destroy(queue);
+                return Err(AppError::Kafka("DeleteRecords timed out".into()));
+            }
+
+            let err = rdsys::rd_kafka_event_error(event);
+            if err != rdsys::rd_kafka_resp_err_t::RD_KAFKA_RESP_ERR_NO_ERROR {
+                let c_msg = rdsys::rd_kafka_event_error_string(event);
+                let msg = if c_msg.is_null() {
+                    "DeleteRecords failed".to_string()
+                } else {
+                    CStr::from_ptr(c_msg).to_string_lossy().into_owned()
+                };
+                rdsys::rd_kafka_event_destroy(event);
+                rdsys::rd_kafka_queue_destroy(queue);
+                return Err(AppError::Kafka(msg));
+            }
+
+            let result = rdsys::rd_kafka_event_DeleteRecords_result(event);
+            if result.is_null() {
+                rdsys::rd_kafka_event_destroy(event);
+                rdsys::rd_kafka_queue_destroy(queue);
+                return Err(AppError::Kafka("DeleteRecords returned unexpected result".into()));
+            }
+
+            let offsets = rdsys::rd_kafka_DeleteRecords_result_offsets(result);
+            if offsets.is_null() {
+                rdsys::rd_kafka_event_destroy(event);
+                rdsys::rd_kafka_queue_destroy(queue);
+                return Err(AppError::Kafka("DeleteRecords returned no offsets".into()));
+            }
+
+            let offsets = &*offsets;
+            for i in 0..(offsets.cnt as isize) {
+                let elem = &*offsets.elems.offset(i);
+                if elem.err != rdsys::rd_kafka_resp_err_t::RD_KAFKA_RESP_ERR_NO_ERROR {
+                    let topic_name = if elem.topic.is_null() {
+                        "<unknown>".to_string()
+                    } else {
+                        CStr::from_ptr(elem.topic).to_string_lossy().into_owned()
+                    };
+                    rdsys::rd_kafka_event_destroy(event);
+                    rdsys::rd_kafka_queue_destroy(queue);
+                    return Err(AppError::Kafka(format!(
+                        "DeleteRecords failed for {}[{}]: {:?}",
+                        topic_name, elem.partition, elem.err
+                    )));
+                }
+            }
+
+            rdsys::rd_kafka_event_destroy(event);
+            rdsys::rd_kafka_queue_destroy(queue);
+            Ok(())
+        })
+        .await
+        .map_err(|e| AppError::Kafka(format!("DeleteRecords task failed: {}", e)))?
     }
 }

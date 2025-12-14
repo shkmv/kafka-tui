@@ -39,6 +39,9 @@ pub fn modal_key_binding(key: KeyEvent, modal: &ModalType) -> Option<Action> {
         ModalType::ConnectionForm(f) => connection_form_key(key, f),
         ModalType::TopicCreateForm(f) => topic_form_key(key, f),
         ModalType::ProduceForm(f) => produce_form_key(key, f),
+        ModalType::AddPartitionsForm(f) => add_partitions_form_key(key, f),
+        ModalType::AlterConfigForm(f) => alter_config_form_key(key, f),
+        ModalType::PurgeTopicForm(f) => purge_topic_form_key(key, f),
     }
 }
 
@@ -155,6 +158,76 @@ fn produce_form_key(key: KeyEvent, f: &ProduceFormState) -> Option<Action> {
     Some(Action::UpdateProduceForm(s))
 }
 
+fn add_partitions_form_key(key: KeyEvent, f: &AddPartitionsFormState) -> Option<Action> {
+    let mut s = f.clone();
+    match key.code {
+        KeyCode::Esc => return Some(Action::ModalCancel),
+        KeyCode::Enter => {
+            let new_count: i32 = f.new_count.parse().unwrap_or(0);
+            return (new_count > f.current_count).then_some(Action::ModalConfirm);
+        }
+        KeyCode::Char(c) if c.is_ascii_digit() => s.new_count.push(c),
+        KeyCode::Backspace => { s.new_count.pop(); }
+        _ => return None,
+    }
+    Some(Action::UpdateAddPartitionsForm(s))
+}
+
+fn alter_config_form_key(key: KeyEvent, f: &AlterConfigFormState) -> Option<Action> {
+    let mut s = f.clone();
+
+    if s.editing {
+        match key.code {
+            KeyCode::Enter => {
+                if let Some((_, v, m)) = s.configs.get_mut(s.selected_index) {
+                    *v = std::mem::take(&mut s.edit_value);
+                    *m = true;
+                }
+                s.editing = false;
+            }
+            KeyCode::Esc => { s.editing = false; s.edit_value.clear(); }
+            KeyCode::Char(c) => s.edit_value.push(c),
+            KeyCode::Backspace => { s.edit_value.pop(); }
+            _ => return None,
+        }
+    } else {
+        match key.code {
+            KeyCode::Esc => return Some(Action::ModalCancel),
+            KeyCode::Enter => {
+                if s.configs.iter().any(|(_, _, m)| *m) {
+                    return Some(Action::ModalConfirm);
+                }
+                return None;
+            }
+            KeyCode::Up | KeyCode::Char('k') => s.selected_index = s.selected_index.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => {
+                if s.selected_index + 1 < s.configs.len() { s.selected_index += 1; }
+            }
+            KeyCode::Char('e') => {
+                if let Some((_, v, _)) = s.configs.get(s.selected_index) {
+                    s.editing = true;
+                    s.edit_value = v.clone();
+                }
+            }
+            _ => return None,
+        }
+    }
+    Some(Action::UpdateAlterConfigForm(s))
+}
+
+fn purge_topic_form_key(key: KeyEvent, f: &PurgeTopicFormState) -> Option<Action> {
+    let mut s = f.clone();
+    match key.code {
+        KeyCode::Esc => return Some(Action::ModalCancel),
+        KeyCode::Enter => return Some(Action::ModalConfirm),
+        KeyCode::Tab | KeyCode::Up | KeyCode::Down => s.purge_all = !s.purge_all,
+        KeyCode::Char(c) if !s.purge_all && c.is_ascii_digit() => s.offset.push(c),
+        KeyCode::Backspace if !s.purge_all => { s.offset.pop(); }
+        _ => return None,
+    }
+    Some(Action::UpdatePurgeTopicForm(s))
+}
+
 pub fn screen_key_binding(screen: &Screen, key: KeyEvent, sidebar_focused: bool) -> Option<Action> {
     if sidebar_focused {
         return match key.code {
@@ -195,17 +268,23 @@ pub fn screen_key_binding(screen: &Screen, key: KeyEvent, sidebar_focused: bool)
             (KeyModifiers::CONTROL, KeyCode::Char('r')) | (_, KeyCode::F(5)) => Some(Action::FetchTopics),
             _ => None,
         },
-        Screen::TopicDetails { topic_name } => match key.code {
-            KeyCode::Tab | KeyCode::Left | KeyCode::Char('h') | KeyCode::Right | KeyCode::Char('l') => Some(Action::SwitchTopicDetailTab),
-            KeyCode::Char('m') => Some(Action::ViewTopicMessages(topic_name.clone())),
-            KeyCode::Char('d') => Some(Action::ShowModal(ModalType::Confirm {
-                title: "Delete Topic".into(),
-                message: format!("Delete '{}'?", topic_name),
-                action: ConfirmAction::DeleteTopic(topic_name.clone()),
-            })),
-            KeyCode::F(5) => Some(Action::ViewTopicDetails(topic_name.clone())),
-            _ => None,
-        },
+        Screen::TopicDetails { topic_name } => {
+            // Need access to state for partition count - handle 'p' in handler instead
+            match key.code {
+                KeyCode::Tab | KeyCode::Left | KeyCode::Char('h') | KeyCode::Right | KeyCode::Char('l') => Some(Action::SwitchTopicDetailTab),
+                KeyCode::Char('m') => Some(Action::ViewTopicMessages(topic_name.clone())),
+                KeyCode::Char('d') => Some(Action::ShowModal(ModalType::Confirm {
+                    title: "Delete Topic".into(),
+                    message: format!("Delete '{}'?", topic_name),
+                    action: ConfirmAction::DeleteTopic(topic_name.clone()),
+                })),
+                // 'p' - add partitions (handled in handler with state access)
+                // 'e' - edit config (handled in handler with state access)
+                // 'x' - purge (handled in handler with state access)
+                KeyCode::F(5) => Some(Action::ViewTopicDetails(topic_name.clone())),
+                _ => None,
+            }
+        }
         Screen::Messages { topic_name } => match (key.modifiers, key.code) {
             (KeyModifiers::NONE, KeyCode::Char('v') | KeyCode::Enter) => Some(Action::ToggleMessageDetail),
             (KeyModifiers::NONE, KeyCode::Char('p')) => Some(Action::ShowModal(ModalType::ProduceForm(ProduceFormState {
@@ -245,7 +324,7 @@ pub fn get_help_text(screen: &Screen) -> Vec<(&'static str, &'static str)> {
         Screen::Topics => vec![("j/k", "Nav"), ("m", "Messages"), ("i", "Details"), ("n", "New"), ("/", "Filter")],
         Screen::Messages { .. } => vec![("j/k", "Nav"), ("v", "Detail"), ("p", "Produce"), ("F5", "Refresh")],
         Screen::ConsumerGroups => vec![("j/k", "Nav"), ("Enter", "Details"), ("/", "Filter"), ("F5", "Refresh")],
-        Screen::TopicDetails { .. } => vec![("Tab", "Switch"), ("m", "Messages"), ("d", "Delete")],
+        Screen::TopicDetails { .. } => vec![("Tab", "Switch"), ("m", "Messages"), ("d", "Delete"), ("p", "Add Parts"), ("e", "Config"), ("x", "Purge")],
         Screen::ConsumerGroupDetails { .. } => vec![("Tab", "Switch"), ("F5", "Refresh")],
         Screen::Brokers => vec![("F5", "Refresh")],
     });

@@ -1,20 +1,26 @@
+pub mod add_partitions_form_modal;
+pub mod alter_config_form_modal;
 pub mod confirm_modal;
 pub mod connection_form_modal;
 pub mod header;
 pub mod help_modal;
 pub mod input_modal;
 pub mod produce_form_modal;
+pub mod purge_topic_form_modal;
 pub mod sidebar;
 pub mod status_bar;
 pub mod toast;
 pub mod topic_create_form_modal;
 
+pub use add_partitions_form_modal::AddPartitionsFormModal;
+pub use alter_config_form_modal::AlterConfigFormModal;
 pub use confirm_modal::ConfirmModal;
 pub use connection_form_modal::ConnectionFormModal;
 pub use header::Header;
 pub use help_modal::HelpModal;
 pub use input_modal::InputModal;
 pub use produce_form_modal::ProduceFormModal;
+pub use purge_topic_form_modal::PurgeTopicFormModal;
 pub use sidebar::Sidebar;
 pub use status_bar::StatusBar;
 pub use toast::Toast;
