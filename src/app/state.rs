@@ -56,6 +56,12 @@ pub struct ConnectionState {
     pub selected_index: usize,
 }
 
+impl Navigable for ConnectionState {
+    fn selected_index(&self) -> usize { self.selected_index }
+    fn set_selected_index(&mut self, index: usize) { self.selected_index = index; }
+    fn item_count(&self) -> usize { self.available_profiles.len() }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ConnectionStatus {
     #[default]
@@ -158,6 +164,12 @@ impl TopicsState {
     }
 }
 
+impl Navigable for TopicsState {
+    fn selected_index(&self) -> usize { self.selected_index }
+    fn set_selected_index(&mut self, index: usize) { self.selected_index = index; }
+    fn item_count(&self) -> usize { self.filtered_topics().len() }
+}
+
 #[derive(Debug, Clone)]
 pub struct TopicInfo {
     pub name: String,
@@ -219,6 +231,12 @@ impl MessagesState {
     }
 }
 
+impl Navigable for MessagesState {
+    fn selected_index(&self) -> usize { self.selected_index }
+    fn set_selected_index(&mut self, index: usize) { self.selected_index = index; }
+    fn item_count(&self) -> usize { self.messages.len() }
+}
+
 #[derive(Debug, Clone)]
 pub struct KafkaMessage {
     pub partition: i32,
@@ -270,6 +288,12 @@ impl ConsumerGroupsState {
     pub fn selected_group(&self) -> Option<&ConsumerGroupInfo> {
         self.filtered_groups().get(self.selected_index).copied()
     }
+}
+
+impl Navigable for ConsumerGroupsState {
+    fn selected_index(&self) -> usize { self.selected_index }
+    fn set_selected_index(&mut self, index: usize) { self.selected_index = index; }
+    fn item_count(&self) -> usize { self.filtered_groups().len() }
 }
 
 #[derive(Debug, Clone)]
@@ -335,12 +359,67 @@ pub struct BrokersState {
 
 const MAX_LOG_ENTRIES: usize = 1000;
 
+/// Trait for navigable lists that support selection.
+pub trait Navigable {
+    fn selected_index(&self) -> usize;
+    fn set_selected_index(&mut self, index: usize);
+    fn item_count(&self) -> usize;
+
+    fn nav_up(&mut self) {
+        let current = self.selected_index();
+        self.set_selected_index(current.saturating_sub(1));
+    }
+
+    fn nav_down(&mut self) {
+        let current = self.selected_index();
+        let max = self.item_count();
+        if current + 1 < max {
+            self.set_selected_index(current + 1);
+        }
+    }
+
+    fn nav_to(&mut self, target: usize) {
+        let max = self.item_count().saturating_sub(1);
+        self.set_selected_index(target.min(max));
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Level {
     Info,
     Success,
     Warning,
     Error,
+}
+
+impl Level {
+    pub fn style(&self) -> ratatui::style::Style {
+        use crate::ui::theme::THEME;
+        match self {
+            Level::Info => THEME.info_style(),
+            Level::Success => THEME.success_style(),
+            Level::Warning => THEME.warning_style(),
+            Level::Error => THEME.error_style(),
+        }
+    }
+
+    pub fn icon(&self) -> &'static str {
+        match self {
+            Level::Info => "",
+            Level::Success => "",
+            Level::Warning => "",
+            Level::Error => "",
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Level::Info => "INFO",
+            Level::Success => "OK",
+            Level::Warning => "WARN",
+            Level::Error => "ERR",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -382,6 +461,12 @@ impl LogsState {
     }
 }
 
+impl Navigable for LogsState {
+    fn selected_index(&self) -> usize { self.selected_index }
+    fn set_selected_index(&mut self, index: usize) { self.selected_index = index; }
+    fn item_count(&self) -> usize { self.filtered_entries().len() }
+}
+
 // === UI ===
 
 #[derive(Debug, Default)]
@@ -420,6 +505,24 @@ impl SidebarItem {
             Self::ConsumerGroups => "Consumer Groups",
             Self::Brokers => "Brokers",
             Self::Logs => "Logs",
+        }
+    }
+
+    pub fn next(&self) -> Self {
+        match self {
+            Self::Topics => Self::ConsumerGroups,
+            Self::ConsumerGroups => Self::Brokers,
+            Self::Brokers => Self::Logs,
+            Self::Logs => Self::Topics,
+        }
+    }
+
+    pub fn prev(&self) -> Self {
+        match self {
+            Self::Topics => Self::Logs,
+            Self::ConsumerGroups => Self::Topics,
+            Self::Brokers => Self::ConsumerGroups,
+            Self::Logs => Self::Brokers,
         }
     }
 }

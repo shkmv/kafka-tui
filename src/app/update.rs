@@ -2,7 +2,7 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use crate::app::actions::{Action, Command};
-use crate::app::state::*;
+use crate::app::state::{*, Navigable};
 
 pub fn update(state: &mut AppState, action: Action) -> Command {
     match action {
@@ -541,11 +541,11 @@ fn handle_modal_confirm(state: &mut AppState) -> Command {
 fn nav_up(state: &mut AppState) {
     if state.ui_state.sidebar_focused { return sidebar_prev(state); }
     match &state.active_screen {
-        Screen::Topics => state.topics_state.selected_index = state.topics_state.selected_index.saturating_sub(1),
-        Screen::Messages { .. } => state.messages_state.selected_index = state.messages_state.selected_index.saturating_sub(1),
-        Screen::ConsumerGroups => state.consumer_groups_state.selected_index = state.consumer_groups_state.selected_index.saturating_sub(1),
-        Screen::Welcome => state.connection.selected_index = state.connection.selected_index.saturating_sub(1),
-        Screen::Logs => state.logs_state.selected_index = state.logs_state.selected_index.saturating_sub(1),
+        Screen::Topics => state.topics_state.nav_up(),
+        Screen::Messages { .. } => state.messages_state.nav_up(),
+        Screen::ConsumerGroups => state.consumer_groups_state.nav_up(),
+        Screen::Welcome => state.connection.nav_up(),
+        Screen::Logs => state.logs_state.nav_up(),
         _ => {}
     }
 }
@@ -553,68 +553,31 @@ fn nav_up(state: &mut AppState) {
 fn nav_down(state: &mut AppState) {
     if state.ui_state.sidebar_focused { return sidebar_next(state); }
     match &state.active_screen {
-        Screen::Topics => {
-            let max = state.topics_state.filtered_topics().len();
-            if state.topics_state.selected_index + 1 < max { state.topics_state.selected_index += 1; }
-        }
-        Screen::Messages { .. } => {
-            let max = state.messages_state.messages.len();
-            if state.messages_state.selected_index + 1 < max { state.messages_state.selected_index += 1; }
-        }
-        Screen::ConsumerGroups => {
-            let max = state.consumer_groups_state.filtered_groups().len();
-            if state.consumer_groups_state.selected_index + 1 < max { state.consumer_groups_state.selected_index += 1; }
-        }
-        Screen::Welcome => {
-            let max = state.connection.available_profiles.len();
-            if state.connection.selected_index + 1 < max { state.connection.selected_index += 1; }
-        }
-        Screen::Logs => {
-            let max = state.logs_state.filtered_entries().len();
-            if state.logs_state.selected_index + 1 < max { state.logs_state.selected_index += 1; }
-        }
+        Screen::Topics => state.topics_state.nav_down(),
+        Screen::Messages { .. } => state.messages_state.nav_down(),
+        Screen::ConsumerGroups => state.consumer_groups_state.nav_down(),
+        Screen::Welcome => state.connection.nav_down(),
+        Screen::Logs => state.logs_state.nav_down(),
         _ => {}
     }
 }
 
 fn nav_to(state: &mut AppState, target: usize) {
     match &state.active_screen {
-        Screen::Topics => {
-            let max = state.topics_state.filtered_topics().len().saturating_sub(1);
-            state.topics_state.selected_index = target.min(max);
-        }
-        Screen::Messages { .. } => {
-            let max = state.messages_state.messages.len().saturating_sub(1);
-            state.messages_state.selected_index = target.min(max);
-        }
-        Screen::ConsumerGroups => {
-            let max = state.consumer_groups_state.filtered_groups().len().saturating_sub(1);
-            state.consumer_groups_state.selected_index = target.min(max);
-        }
-        Screen::Logs => {
-            let max = state.logs_state.filtered_entries().len().saturating_sub(1);
-            state.logs_state.selected_index = target.min(max);
-        }
+        Screen::Topics => state.topics_state.nav_to(target),
+        Screen::Messages { .. } => state.messages_state.nav_to(target),
+        Screen::ConsumerGroups => state.consumer_groups_state.nav_to(target),
+        Screen::Logs => state.logs_state.nav_to(target),
         _ => {}
     }
 }
 
 fn sidebar_prev(state: &mut AppState) {
-    state.ui_state.selected_sidebar_item = match state.ui_state.selected_sidebar_item {
-        SidebarItem::Topics => SidebarItem::Logs,
-        SidebarItem::ConsumerGroups => SidebarItem::Topics,
-        SidebarItem::Brokers => SidebarItem::ConsumerGroups,
-        SidebarItem::Logs => SidebarItem::Brokers,
-    };
+    state.ui_state.selected_sidebar_item = state.ui_state.selected_sidebar_item.prev();
 }
 
 fn sidebar_next(state: &mut AppState) {
-    state.ui_state.selected_sidebar_item = match state.ui_state.selected_sidebar_item {
-        SidebarItem::Topics => SidebarItem::ConsumerGroups,
-        SidebarItem::ConsumerGroups => SidebarItem::Brokers,
-        SidebarItem::Brokers => SidebarItem::Logs,
-        SidebarItem::Logs => SidebarItem::Topics,
-    };
+    state.ui_state.selected_sidebar_item = state.ui_state.selected_sidebar_item.next();
 }
 
 fn handle_select(state: &mut AppState) -> Command {

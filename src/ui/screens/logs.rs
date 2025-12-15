@@ -5,6 +5,7 @@ use ratatui::{
 
 use crate::app::state::{AppState, Level};
 use crate::ui::theme::THEME;
+use crate::ui::widgets::render_empty;
 
 pub struct LogsScreen;
 
@@ -24,10 +25,7 @@ impl LogsScreen {
             .constraints([Constraint::Length(2), Constraint::Min(5)])
             .split(inner);
 
-        // Toolbar
         Self::render_toolbar(frame, chunks[0], state);
-
-        // Log entries
         Self::render_entries(frame, chunks[1], state);
     }
 
@@ -54,10 +52,7 @@ impl LogsScreen {
         let entries = state.logs_state.filtered_entries();
 
         if entries.is_empty() {
-            let empty = Paragraph::new("No log entries")
-                .style(THEME.muted_style())
-                .alignment(Alignment::Center);
-            frame.render_widget(empty, area);
+            render_empty(frame, area, "No log entries");
             return;
         }
 
@@ -69,8 +64,7 @@ impl LogsScreen {
 
         let rows: Vec<Row> = entries.iter().enumerate().map(|(i, entry)| {
             let time = entry.timestamp.format("%H:%M:%S").to_string();
-            let level_style = Self::level_style(entry.level);
-            let level_text = format!("{} {}", Self::level_icon(entry.level), Self::level_label(entry.level));
+            let level_text = format!("{} {}", entry.level.icon(), entry.level.label());
 
             let row_style = if i == state.logs_state.selected_index {
                 THEME.selected_style()
@@ -80,7 +74,7 @@ impl LogsScreen {
 
             Row::new(vec![
                 Cell::from(format!(" {}", time)).style(THEME.muted_style()),
-                Cell::from(level_text).style(level_style),
+                Cell::from(level_text).style(entry.level.style()),
                 Cell::from(entry.message.clone()),
             ]).style(row_style)
         }).collect();
@@ -97,32 +91,5 @@ impl LogsScreen {
         .row_highlight_style(THEME.selected_style());
 
         frame.render_widget(table, area);
-    }
-
-    fn level_style(level: Level) -> Style {
-        match level {
-            Level::Info => THEME.info_style(),
-            Level::Success => THEME.success_style(),
-            Level::Warning => THEME.warning_style(),
-            Level::Error => THEME.error_style(),
-        }
-    }
-
-    fn level_icon(level: Level) -> &'static str {
-        match level {
-            Level::Info => "",
-            Level::Success => "",
-            Level::Warning => "",
-            Level::Error => "",
-        }
-    }
-
-    fn level_label(level: Level) -> &'static str {
-        match level {
-            Level::Info => "INFO",
-            Level::Success => "OK",
-            Level::Warning => "WARN",
-            Level::Error => "ERR",
-        }
     }
 }

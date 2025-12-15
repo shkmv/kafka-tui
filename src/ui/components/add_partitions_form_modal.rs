@@ -1,11 +1,12 @@
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Clear, Paragraph},
 };
 
 use crate::app::state::AddPartitionsFormState;
 use crate::ui::layout::centered_rect_fixed;
 use crate::ui::theme::THEME;
+use crate::ui::widgets::{format_input, modal_block};
 
 pub struct AddPartitionsFormModal;
 
@@ -15,13 +16,7 @@ impl AddPartitionsFormModal {
 
         frame.render_widget(Clear, area);
 
-        let block = Block::default()
-            .title(" Add Partitions ")
-            .title_style(THEME.header_style())
-            .borders(Borders::ALL)
-            .border_style(THEME.border_style(true))
-            .style(THEME.modal_style());
-
+        let block = modal_block("Add Partitions");
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
@@ -38,30 +33,21 @@ impl AddPartitionsFormModal {
             ])
             .split(inner);
 
-        // Topic name
         let topic_info = Paragraph::new(format!("Topic: {}", form_state.topic))
             .style(THEME.title_style());
         frame.render_widget(topic_info, chunks[0]);
 
-        // Current count
         let current = Paragraph::new(format!("Current partitions: {}", form_state.current_count))
             .style(THEME.muted_style());
         frame.render_widget(current, chunks[1]);
 
-        // New count label
         let label = Paragraph::new("New partition count:").style(THEME.normal_style());
         frame.render_widget(label, chunks[3]);
 
-        // New count input
-        let display = if form_state.new_count.is_empty() {
-            String::from("█")
-        } else {
-            format!("{}█", form_state.new_count)
-        };
+        let display = format_input(&form_state.new_count, true, "");
         let input = Paragraph::new(display).style(THEME.input_style(true));
         frame.render_widget(input, chunks[4]);
 
-        // Hint
         let hint = Paragraph::new("Enter: confirm | Esc: cancel")
             .style(THEME.muted_style())
             .alignment(Alignment::Center);
