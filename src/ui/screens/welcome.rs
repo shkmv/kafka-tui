@@ -24,20 +24,20 @@ impl WelcomeScreen {
             .direction(Direction::Vertical)
             .margin(2)
             .constraints([
-                Constraint::Length(6),  // Logo/title
+                Constraint::Length(5),  // Logo/title
                 Constraint::Min(10),    // Connection list
                 Constraint::Length(3),  // Hints
             ])
             .split(inner);
 
         // ASCII Logo
-        let logo = r#"
-  _  __      __ _           _____ _   _ ___
- | |/ /__ _ / _| | ____ _  |_   _| | | |_ _|
- | ' // _` | |_| |/ / _` |   | | | | | || |
- | . \ (_| |  _|   < (_| |   | | | |_| || |
- |_|\_\__,_|_| |_|\_\__,_|   |_|  \___/|___|
-        "#;
+        let logo = concat!(
+            "  _  __      __ _           _____ _   _ ___ \n",
+            " | |/ /__ _ / _| | ____ _  |_   _| | | |_ _|\n",
+            " | ' // _` | |_| |/ / _` |   | | | | | || | \n",
+            " | . \\ (_| |  _|   < (_| |   | | | |_| || | \n",
+            " |_|\\_\\__,_|_| |_|\\_\\__,_|   |_|  \\___/|___|",
+        );
 
         let logo_widget = Paragraph::new(logo)
             .style(Style::default().fg(THEME.accent_secondary))
