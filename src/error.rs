@@ -28,6 +28,9 @@ pub enum AppError {
 
     #[error("Terminal error: {0}")]
     Terminal(String),
+
+    #[error("Validation error in {field}: {message}")]
+    Validation { field: String, message: String },
 }
 
 impl From<rdkafka::error::KafkaError> for AppError {
