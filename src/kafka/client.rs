@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::ffi::CStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,24 +17,47 @@ use crate::app::state::{
 use crate::error::{AppError, AppResult};
 use crate::kafka::config::{KafkaConfig, KafkaSaslMechanism, SecurityConfig};
 
+/// Custom Kafka context that routes rdkafka logs to tracing.
 #[derive(Clone)]
-struct SilentContext;
+struct LoggingContext;
 
-impl ClientContext for SilentContext {
-    fn log(&self, _: RDKafkaLogLevel, _: &str, _: &str) {}
-    fn error(&self, _: rdkafka::error::KafkaError, _: &str) {}
+impl ClientContext for LoggingContext {
+    fn log(&self, level: RDKafkaLogLevel, fac: &str, msg: &str) {
+        match level {
+            RDKafkaLogLevel::Emerg | RDKafkaLogLevel::Alert | RDKafkaLogLevel::Critical => {
+                tracing::error!(target: "rdkafka", facility = fac, "{}", msg);
+            }
+            RDKafkaLogLevel::Error => {
+                tracing::error!(target: "rdkafka", facility = fac, "{}", msg);
+            }
+            RDKafkaLogLevel::Warning | RDKafkaLogLevel::Notice => {
+                tracing::warn!(target: "rdkafka", facility = fac, "{}", msg);
+            }
+            RDKafkaLogLevel::Info => {
+                tracing::debug!(target: "rdkafka", facility = fac, "{}", msg);
+            }
+            RDKafkaLogLevel::Debug => {
+                tracing::trace!(target: "rdkafka", facility = fac, "{}", msg);
+            }
+        }
+    }
+
+    fn error(&self, err: rdkafka::error::KafkaError, msg: &str) {
+        tracing::warn!(target: "rdkafka", error = %err, "{}", msg);
+    }
 }
-impl ConsumerContext for SilentContext {}
-impl ProducerContext for SilentContext {
+
+impl ConsumerContext for LoggingContext {}
+
+impl ProducerContext for LoggingContext {
     type DeliveryOpaque = ();
     fn delivery(&self, _: &rdkafka::producer::DeliveryResult<'_>, _: ()) {}
 }
 
 pub struct KafkaClient {
     config: KafkaConfig,
-    admin: AdminClient<SilentContext>,
-    consumer: BaseConsumer<SilentContext>,
-    producer: FutureProducer<SilentContext>,
+    admin: AdminClient<LoggingContext>,
+    producer: FutureProducer<LoggingContext>,
 }
 
 impl KafkaClient {
@@ -43,22 +65,15 @@ impl KafkaClient {
         let mut base = Self::base_config(&config);
 
         let admin = base.clone()
-            .create_with_context(SilentContext)
+            .create_with_context(LoggingContext)
             .map_err(|e| AppError::Kafka(format!("Admin client: {}", e)))?;
-
-        let consumer = base.clone()
-            .set("group.id", "kafka-tui-browser")
-            .set("enable.auto.commit", "false")
-            .set("auto.offset.reset", "earliest")
-            .create_with_context(SilentContext)
-            .map_err(|e| AppError::Kafka(format!("Consumer: {}", e)))?;
 
         let producer = base
             .set("message.timeout.ms", "5000")
-            .create_with_context(SilentContext)
+            .create_with_context(LoggingContext)
             .map_err(|e| AppError::Kafka(format!("Producer: {}", e)))?;
 
-        Ok(Arc::new(Self { config, admin, consumer, producer }))
+        Ok(Arc::new(Self { config, admin, producer }))
     }
 
     fn base_config(config: &KafkaConfig) -> ClientConfig {
@@ -113,31 +128,52 @@ impl KafkaClient {
         c
     }
 
+    /// Create a temporary consumer for blocking operations.
+    fn create_temp_consumer(config: &KafkaConfig) -> AppResult<BaseConsumer<LoggingContext>> {
+        Self::base_config(config)
+            .set("group.id", "kafka-tui-temp")
+            .set("enable.auto.commit", "false")
+            .create_with_context(LoggingContext)
+            .map_err(|e| AppError::Kafka(format!("Temp consumer: {}", e)))
+    }
+
     pub async fn test_connection(&self) -> AppResult<()> {
-        self.consumer
-            .fetch_metadata(None, Duration::from_secs(10))
-            .map_err(|e| AppError::Kafka(format!("Connection failed: {}", e)))?;
-        Ok(())
+        let config = self.config.clone();
+        tokio::task::spawn_blocking(move || {
+            let consumer = Self::create_temp_consumer(&config)?;
+            consumer
+                .fetch_metadata(None, Duration::from_secs(10))
+                .map_err(|e| AppError::Kafka(format!("Connection failed: {}", e)))?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| AppError::Kafka(format!("Connection task failed: {}", e)))?
     }
 
     pub async fn list_topics(&self) -> AppResult<Vec<TopicInfo>> {
-        let metadata = self.consumer
-            .fetch_metadata(None, Duration::from_secs(30))
-            .map_err(|e| AppError::Kafka(format!("Metadata fetch failed: {}", e)))?;
+        let config = self.config.clone();
+        tokio::task::spawn_blocking(move || {
+            let consumer = Self::create_temp_consumer(&config)?;
+            let metadata = consumer
+                .fetch_metadata(None, Duration::from_secs(30))
+                .map_err(|e| AppError::Kafka(format!("Metadata fetch failed: {}", e)))?;
 
-        let mut topics: Vec<_> = metadata.topics().iter().map(|t| {
-            let partitions = t.partitions();
-            TopicInfo {
-                name: t.name().to_string(),
-                partition_count: partitions.len() as i32,
-                replication_factor: partitions.first().map(|p| p.replicas().len() as i32).unwrap_or(0),
-                message_count: None,
-                is_internal: t.name().starts_with("__"),
-            }
-        }).collect();
+            let mut topics: Vec<_> = metadata.topics().iter().map(|t| {
+                let partitions = t.partitions();
+                TopicInfo {
+                    name: t.name().to_string(),
+                    partition_count: partitions.len() as i32,
+                    replication_factor: partitions.first().map(|p| p.replicas().len() as i32).unwrap_or(0),
+                    message_count: None,
+                    is_internal: t.name().starts_with("__"),
+                }
+            }).collect();
 
-        topics.sort_by(|a, b| a.name.cmp(&b.name));
-        Ok(topics)
+            topics.sort_by(|a, b| a.name.cmp(&b.name));
+            Ok(topics)
+        })
+        .await
+        .map_err(|e| AppError::Kafka(format!("List topics task failed: {}", e)))?
     }
 
     pub async fn create_topic(&self, name: &str, partitions: i32, replication: i32) -> AppResult<()> {
@@ -176,52 +212,61 @@ impl KafkaClient {
         partition: Option<i32>,
         limit: usize,
     ) -> AppResult<Vec<KafkaMessage>> {
-        let metadata = self.consumer
-            .fetch_metadata(Some(topic), Duration::from_secs(10))
-            .map_err(|e| AppError::Kafka(format!("Topic metadata: {}", e)))?;
+        let config = self.config.clone();
+        let topic = topic.to_string();
 
-        let topic_meta = metadata.topics().first()
-            .ok_or_else(|| AppError::Kafka("Topic not found".into()))?;
+        tokio::task::spawn_blocking(move || {
+            let consumer = Self::create_temp_consumer(&config)?;
 
-        let partitions: Vec<i32> = partition
-            .map(|p| vec![p])
-            .unwrap_or_else(|| topic_meta.partitions().iter().map(|p| p.id()).collect());
+            let metadata = consumer
+                .fetch_metadata(Some(&topic), Duration::from_secs(10))
+                .map_err(|e| AppError::Kafka(format!("Topic metadata: {}", e)))?;
 
-        let mut tpl = TopicPartitionList::new();
-        for &p in &partitions {
-            tpl.add_partition(topic, p);
-            let offset = match &offset_mode {
-                OffsetMode::Earliest => rdkafka::Offset::Beginning,
-                OffsetMode::Specific(o) => rdkafka::Offset::Offset(*o),
-                OffsetMode::Timestamp(ts) => rdkafka::Offset::Offset(ts.timestamp_millis()),
-                OffsetMode::Latest => {
-                    let (_, high) = self.consumer
-                        .fetch_watermarks(topic, p, Duration::from_secs(10))
-                        .map_err(|e| AppError::Kafka(format!("Watermarks: {}", e)))?;
-                    rdkafka::Offset::Offset((high - limit as i64).max(0))
-                }
-            };
-            tpl.set_partition_offset(topic, p, offset)
-                .map_err(|e| AppError::Kafka(format!("Set offset: {}", e)))?;
-        }
+            let topic_meta = metadata.topics().first()
+                .ok_or_else(|| AppError::Kafka("Topic not found".into()))?;
 
-        self.consumer.assign(&tpl)
-            .map_err(|e| AppError::Kafka(format!("Assign: {}", e)))?;
+            let partitions: Vec<i32> = partition
+                .map(|p| vec![p])
+                .unwrap_or_else(|| topic_meta.partitions().iter().map(|p| p.id()).collect());
 
-        let mut messages = Vec::with_capacity(limit);
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-
-        while messages.len() < limit && std::time::Instant::now() < deadline {
-            match self.consumer.poll(Duration::from_millis(100)) {
-                Some(Ok(msg)) => messages.push(Self::parse_message(&msg)),
-                Some(Err(_)) => {}
-                None if messages.is_empty() => continue,
-                None => break,
+            let mut tpl = TopicPartitionList::new();
+            for &p in &partitions {
+                tpl.add_partition(&topic, p);
+                let offset = match &offset_mode {
+                    OffsetMode::Earliest => rdkafka::Offset::Beginning,
+                    OffsetMode::Specific(o) => rdkafka::Offset::Offset(*o),
+                    OffsetMode::Timestamp(ts) => rdkafka::Offset::Offset(ts.timestamp_millis()),
+                    OffsetMode::Latest => {
+                        let (_, high) = consumer
+                            .fetch_watermarks(&topic, p, Duration::from_secs(10))
+                            .map_err(|e| AppError::Kafka(format!("Watermarks: {}", e)))?;
+                        rdkafka::Offset::Offset((high - limit as i64).max(0))
+                    }
+                };
+                tpl.set_partition_offset(&topic, p, offset)
+                    .map_err(|e| AppError::Kafka(format!("Set offset: {}", e)))?;
             }
-        }
 
-        self.consumer.unassign().ok();
-        Ok(messages)
+            consumer.assign(&tpl)
+                .map_err(|e| AppError::Kafka(format!("Assign: {}", e)))?;
+
+            let mut messages = Vec::with_capacity(limit);
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+
+            while messages.len() < limit && std::time::Instant::now() < deadline {
+                match consumer.poll(Duration::from_millis(100)) {
+                    Some(Ok(msg)) => messages.push(Self::parse_message(&msg)),
+                    Some(Err(_)) => {}
+                    None if messages.is_empty() => continue,
+                    None => break,
+                }
+            }
+
+            consumer.unassign().ok();
+            Ok(messages)
+        })
+        .await
+        .map_err(|e| AppError::Kafka(format!("Fetch messages task failed: {}", e)))?
     }
 
     fn parse_message(msg: &rdkafka::message::BorrowedMessage<'_>) -> KafkaMessage {
@@ -265,55 +310,75 @@ impl KafkaClient {
     }
 
     pub async fn list_consumer_groups(&self) -> AppResult<Vec<ConsumerGroupInfo>> {
-        let groups = self.admin.inner()
-            .fetch_group_list(None, Duration::from_secs(30))
-            .map_err(|e| AppError::Kafka(format!("Fetch groups: {}", e)))?;
+        let config = self.config.clone();
+        tokio::task::spawn_blocking(move || {
+            let consumer = Self::create_temp_consumer(&config)?;
+            let groups = consumer.client()
+                .fetch_group_list(None, Duration::from_secs(30))
+                .map_err(|e| AppError::Kafka(format!("Fetch groups: {}", e)))?;
 
-        Ok(groups.groups().iter()
-            .filter(|g| g.name() != "kafka-tui-browser")
-            .map(|g| ConsumerGroupInfo {
-                group_id: g.name().into(),
-                state: g.state().into(),
-                members_count: g.members().len(),
-                topics: vec![],
-                total_lag: 0,
-            })
-            .collect())
+            Ok(groups.groups().iter()
+                .filter(|g| g.name() != "kafka-tui-browser" && g.name() != "kafka-tui-temp")
+                .map(|g| ConsumerGroupInfo {
+                    group_id: g.name().into(),
+                    state: g.state().into(),
+                    members_count: g.members().len(),
+                    topics: vec![],
+                    total_lag: 0,
+                })
+                .collect())
+        })
+        .await
+        .map_err(|e| AppError::Kafka(format!("List consumer groups task failed: {}", e)))?
     }
 
     pub async fn get_topic_details(&self, topic_name: &str) -> AppResult<TopicDetail> {
-        let metadata = self.consumer
-            .fetch_metadata(Some(topic_name), Duration::from_secs(10))
-            .map_err(|e| AppError::Kafka(format!("Metadata fetch: {}", e)))?;
+        let config = self.config.clone();
+        let topic_name = topic_name.to_string();
 
-        let topic_meta = metadata.topics().first()
-            .ok_or_else(|| AppError::Kafka("Topic not found".into()))?;
+        // First get partition info using spawn_blocking
+        let partitions = tokio::task::spawn_blocking({
+            let config = config.clone();
+            let topic_name = topic_name.clone();
+            move || {
+                let consumer = Self::create_temp_consumer(&config)?;
+                let metadata = consumer
+                    .fetch_metadata(Some(&topic_name), Duration::from_secs(10))
+                    .map_err(|e| AppError::Kafka(format!("Metadata fetch: {}", e)))?;
 
-        let mut partitions = Vec::new();
-        for p in topic_meta.partitions() {
-            let (low, high) = self.consumer
-                .fetch_watermarks(topic_name, p.id(), Duration::from_secs(5))
-                .unwrap_or((0, 0));
+                let topic_meta = metadata.topics().first()
+                    .ok_or_else(|| AppError::Kafka("Topic not found".into()))?;
 
-            partitions.push(PartitionInfo {
-                id: p.id(),
-                leader: p.leader(),
-                replicas: p.replicas().to_vec(),
-                isr: p.isr().to_vec(),
-                low_watermark: low,
-                high_watermark: high,
-            });
-        }
+                let mut partitions = Vec::new();
+                for p in topic_meta.partitions() {
+                    let (low, high) = consumer
+                        .fetch_watermarks(&topic_name, p.id(), Duration::from_secs(5))
+                        .unwrap_or((0, 0));
 
-        partitions.sort_by_key(|p| p.id);
+                    partitions.push(PartitionInfo {
+                        id: p.id(),
+                        leader: p.leader(),
+                        replicas: p.replicas().to_vec(),
+                        isr: p.isr().to_vec(),
+                        low_watermark: low,
+                        high_watermark: high,
+                    });
+                }
 
-        // Fetch config using admin API
-        let config = self.get_topic_config(topic_name).await.unwrap_or_default();
+                partitions.sort_by_key(|p| p.id);
+                Ok::<_, AppError>(partitions)
+            }
+        })
+        .await
+        .map_err(|e| AppError::Kafka(format!("Get topic details task failed: {}", e)))??;
+
+        // Fetch config using admin API (already async)
+        let topic_config = self.get_topic_config(&topic_name).await.unwrap_or_default();
 
         Ok(TopicDetail {
-            name: topic_name.to_string(),
+            name: topic_name.clone(),
             partitions,
-            config,
+            config: topic_config,
             is_internal: topic_name.starts_with("__"),
         })
     }
@@ -346,34 +411,44 @@ impl KafkaClient {
     }
 
     pub async fn get_consumer_group_details(&self, group_id: &str) -> AppResult<ConsumerGroupDetail> {
-        // Get group description - extract data before any await
-        let (state, members) = {
-            let groups = self.admin.inner()
-                .fetch_group_list(Some(group_id), Duration::from_secs(10))
-                .map_err(|e| AppError::Kafka(format!("Fetch group: {}", e)))?;
+        let config = self.config.clone();
+        let group_id_owned = group_id.to_string();
 
-            let group = groups.groups().iter()
-                .find(|g| g.name() == group_id)
-                .ok_or_else(|| AppError::Kafka("Group not found".into()))?;
+        // Get group description using spawn_blocking
+        let (state, members) = tokio::task::spawn_blocking({
+            let config = config.clone();
+            let group_id = group_id_owned.clone();
+            move || {
+                let consumer = Self::create_temp_consumer(&config)?;
+                let groups = consumer.client()
+                    .fetch_group_list(Some(&group_id), Duration::from_secs(10))
+                    .map_err(|e| AppError::Kafka(format!("Fetch group: {}", e)))?;
 
-            let state = group.state().to_string();
-            let members: Vec<GroupMember> = group.members().iter().map(|m| {
-                GroupMember {
-                    member_id: m.id().to_string(),
-                    client_id: m.client_id().to_string(),
-                    client_host: m.client_host().to_string(),
-                    assignments: Self::parse_member_assignment(m.assignment().unwrap_or(&[])),
-                }
-            }).collect();
+                let group = groups.groups().iter()
+                    .find(|g| g.name() == group_id)
+                    .ok_or_else(|| AppError::Kafka("Group not found".into()))?;
 
-            (state, members)
-        };
+                let state = group.state().to_string();
+                let members: Vec<GroupMember> = group.members().iter().map(|m| {
+                    GroupMember {
+                        member_id: m.id().to_string(),
+                        client_id: m.client_id().to_string(),
+                        client_host: m.client_host().to_string(),
+                        assignments: Self::parse_member_assignment(m.assignment().unwrap_or(&[])),
+                    }
+                }).collect();
+
+                Ok::<_, AppError>((state, members))
+            }
+        })
+        .await
+        .map_err(|e| AppError::Kafka(format!("Get group details task failed: {}", e)))??;
 
         // Get committed offsets for the group
-        let offsets = self.get_group_offsets(group_id).await.unwrap_or_default();
+        let offsets = self.get_group_offsets(&group_id_owned).await.unwrap_or_default();
 
         Ok(ConsumerGroupDetail {
-            group_id: group_id.to_string(),
+            group_id: group_id_owned,
             state,
             coordinator: None,
             members,
@@ -420,60 +495,71 @@ impl KafkaClient {
     }
 
     async fn get_group_offsets(&self, group_id: &str) -> AppResult<Vec<PartitionOffset>> {
-        // Create a temporary consumer for this group to fetch offsets
-        let mut config = Self::base_config(&self.config);
-        config.set("group.id", group_id);
+        let config = self.config.clone();
+        let group_id = group_id.to_string();
 
-        let consumer: BaseConsumer<SilentContext> = config
-            .create_with_context(SilentContext)
-            .map_err(|e| AppError::Kafka(format!("Consumer for offsets: {}", e)))?;
+        tokio::task::spawn_blocking(move || {
+            // Create a temporary consumer for this group to fetch offsets
+            let consumer: BaseConsumer<LoggingContext> = Self::base_config(&config)
+                .set("group.id", &group_id)
+                .create_with_context(LoggingContext)
+                .map_err(|e| AppError::Kafka(format!("Consumer for offsets: {}", e)))?;
 
-        let committed = consumer
-            .committed(Duration::from_secs(10))
-            .map_err(|e| AppError::Kafka(format!("Fetch committed: {}", e)))?;
+            let committed = consumer
+                .committed(Duration::from_secs(10))
+                .map_err(|e| AppError::Kafka(format!("Fetch committed: {}", e)))?;
 
-        let mut offsets = Vec::new();
-        for elem in committed.elements() {
-            let current_offset = match elem.offset() {
-                rdkafka::Offset::Offset(o) => o,
-                _ => continue,
-            };
+            let mut offsets = Vec::new();
+            for elem in committed.elements() {
+                let current_offset = match elem.offset() {
+                    rdkafka::Offset::Offset(o) => o,
+                    _ => continue,
+                };
 
-            // Get log end offset (high watermark)
-            let (_, high) = self.consumer
-                .fetch_watermarks(elem.topic(), elem.partition(), Duration::from_secs(5))
-                .unwrap_or((0, 0));
+                // Get log end offset (high watermark)
+                let (_, high) = consumer
+                    .fetch_watermarks(elem.topic(), elem.partition(), Duration::from_secs(5))
+                    .unwrap_or((0, 0));
 
-            offsets.push(PartitionOffset {
-                topic: elem.topic().to_string(),
-                partition: elem.partition(),
-                current_offset,
-                log_end_offset: high,
-                lag: (high - current_offset).max(0),
-            });
-        }
+                offsets.push(PartitionOffset {
+                    topic: elem.topic().to_string(),
+                    partition: elem.partition(),
+                    current_offset,
+                    log_end_offset: high,
+                    lag: (high - current_offset).max(0),
+                });
+            }
 
-        offsets.sort_by(|a, b| (&a.topic, a.partition).cmp(&(&b.topic, b.partition)));
-        Ok(offsets)
+            offsets.sort_by(|a, b| (&a.topic, a.partition).cmp(&(&b.topic, b.partition)));
+            Ok(offsets)
+        })
+        .await
+        .map_err(|e| AppError::Kafka(format!("Get group offsets task failed: {}", e)))?
     }
 
     pub async fn list_brokers(&self) -> AppResult<(Vec<BrokerInfo>, Option<String>)> {
-        let metadata = self.consumer
-            .fetch_metadata(None, Duration::from_secs(10))
-            .map_err(|e| AppError::Kafka(format!("Metadata fetch: {}", e)))?;
+        let config = self.config.clone();
+        tokio::task::spawn_blocking(move || {
+            let consumer = Self::create_temp_consumer(&config)?;
+            let metadata = consumer
+                .fetch_metadata(None, Duration::from_secs(10))
+                .map_err(|e| AppError::Kafka(format!("Metadata fetch: {}", e)))?;
 
-        let controller_id = metadata.orig_broker_id();
+            let controller_id = metadata.orig_broker_id();
 
-        let brokers: Vec<BrokerInfo> = metadata.brokers().iter().map(|b| {
-            BrokerInfo {
-                id: b.id(),
-                host: b.host().to_string(),
-                port: b.port(),
-                is_controller: b.id() == controller_id,
-            }
-        }).collect();
+            let brokers: Vec<BrokerInfo> = metadata.brokers().iter().map(|b| {
+                BrokerInfo {
+                    id: b.id(),
+                    host: b.host().to_string(),
+                    port: b.port(),
+                    is_controller: b.id() == controller_id,
+                }
+            }).collect();
 
-        Ok((brokers, None)) // cluster_id not easily available in rdkafka
+            Ok((brokers, None)) // cluster_id not easily available in rdkafka
+        })
+        .await
+        .map_err(|e| AppError::Kafka(format!("List brokers task failed: {}", e)))?
     }
 
     pub fn brokers(&self) -> &str {
@@ -527,133 +613,34 @@ impl KafkaClient {
             return Err(AppError::Kafka("Offset must be >= 0".into()));
         }
 
-        let metadata = self.consumer
-            .fetch_metadata(Some(topic), Duration::from_secs(10))
-            .map_err(|e| AppError::Kafka(format!("Metadata fetch: {}", e)))?;
+        let config = self.config.clone();
+        let topic = topic.to_string();
 
-        let topic_meta = metadata.topics().iter()
-            .find(|t| t.name() == topic)
-            .ok_or_else(|| AppError::Kafka("Topic not found".into()))?;
+        tokio::task::spawn_blocking(move || {
+            let consumer = Self::create_temp_consumer(&config)?;
 
-        let mut tpl = TopicPartitionList::new();
-        for p in topic_meta.partitions() {
-            let (_, high) = self.consumer
-                .fetch_watermarks(topic, p.id(), Duration::from_secs(5))
-                .map_err(|e| AppError::Kafka(format!("Fetch watermarks: {}", e)))?;
+            let metadata = consumer
+                .fetch_metadata(Some(&topic), Duration::from_secs(10))
+                .map_err(|e| AppError::Kafka(format!("Metadata fetch: {}", e)))?;
 
-            let offset = before_offset.min(high);
-            tpl.add_partition_offset(topic, p.id(), rdkafka::Offset::Offset(offset))
-                .map_err(|e| AppError::Kafka(format!("Set offset: {}", e)))?;
-        }
+            let topic_meta = metadata.topics().iter()
+                .find(|t| t.name() == topic)
+                .ok_or_else(|| AppError::Kafka("Topic not found".into()))?;
 
-        let client_ptr = self.consumer.client().native_ptr() as usize;
-        tokio::task::spawn_blocking(move || unsafe {
-            use rdkafka::bindings as rdsys;
-            use rdkafka::bindings::rd_kafka_admin_op_t;
+            let mut tpl = TopicPartitionList::new();
+            for p in topic_meta.partitions() {
+                let (_, high) = consumer
+                    .fetch_watermarks(&topic, p.id(), Duration::from_secs(5))
+                    .map_err(|e| AppError::Kafka(format!("Fetch watermarks: {}", e)))?;
 
-            let client_ptr = client_ptr as *mut rdsys::rd_kafka_t;
-            let queue = rdsys::rd_kafka_queue_new(client_ptr);
-            if queue.is_null() {
-                return Err(AppError::Kafka("Failed to create admin result queue".into()));
+                let offset = before_offset.min(high);
+                tpl.add_partition_offset(&topic, p.id(), rdkafka::Offset::Offset(offset))
+                    .map_err(|e| AppError::Kafka(format!("Set offset: {}", e)))?;
             }
 
-            let mut errstr = [0i8; 512];
-            let opts = rdsys::rd_kafka_AdminOptions_new(
-                client_ptr,
-                rd_kafka_admin_op_t::RD_KAFKA_ADMIN_OP_DELETERECORDS,
-            );
-            if opts.is_null() {
-                rdsys::rd_kafka_queue_destroy(queue);
-                return Err(AppError::Kafka("Failed to create admin options".into()));
-            }
-
-            let req_timeout_ms = 30_000;
-            if rdsys::rd_kafka_AdminOptions_set_request_timeout(
-                opts,
-                req_timeout_ms,
-                errstr.as_mut_ptr(),
-                errstr.len(),
-            ) != rdsys::rd_kafka_resp_err_t::RD_KAFKA_RESP_ERR_NO_ERROR
-            {
-                let msg = CStr::from_ptr(errstr.as_ptr()).to_string_lossy().into_owned();
-                rdsys::rd_kafka_AdminOptions_destroy(opts);
-                rdsys::rd_kafka_queue_destroy(queue);
-                return Err(AppError::Kafka(format!("Failed to set timeout: {}", msg)));
-            }
-
-            let del_records = rdsys::rd_kafka_DeleteRecords_new(tpl.ptr());
-            if del_records.is_null() {
-                rdsys::rd_kafka_AdminOptions_destroy(opts);
-                rdsys::rd_kafka_queue_destroy(queue);
-                return Err(AppError::Kafka("Failed to create DeleteRecords request".into()));
-            }
-
-            let mut del_records_arr = [del_records];
-            rdsys::rd_kafka_DeleteRecords(
-                client_ptr,
-                del_records_arr.as_mut_ptr(),
-                del_records_arr.len(),
-                opts,
-                queue,
-            );
-
-            rdsys::rd_kafka_DeleteRecords_destroy(del_records);
-            rdsys::rd_kafka_AdminOptions_destroy(opts);
-
-            let event = rdsys::rd_kafka_queue_poll(queue, req_timeout_ms);
-            if event.is_null() {
-                rdsys::rd_kafka_queue_destroy(queue);
-                return Err(AppError::Kafka("DeleteRecords timed out".into()));
-            }
-
-            let err = rdsys::rd_kafka_event_error(event);
-            if err != rdsys::rd_kafka_resp_err_t::RD_KAFKA_RESP_ERR_NO_ERROR {
-                let c_msg = rdsys::rd_kafka_event_error_string(event);
-                let msg = if c_msg.is_null() {
-                    "DeleteRecords failed".to_string()
-                } else {
-                    CStr::from_ptr(c_msg).to_string_lossy().into_owned()
-                };
-                rdsys::rd_kafka_event_destroy(event);
-                rdsys::rd_kafka_queue_destroy(queue);
-                return Err(AppError::Kafka(msg));
-            }
-
-            let result = rdsys::rd_kafka_event_DeleteRecords_result(event);
-            if result.is_null() {
-                rdsys::rd_kafka_event_destroy(event);
-                rdsys::rd_kafka_queue_destroy(queue);
-                return Err(AppError::Kafka("DeleteRecords returned unexpected result".into()));
-            }
-
-            let offsets = rdsys::rd_kafka_DeleteRecords_result_offsets(result);
-            if offsets.is_null() {
-                rdsys::rd_kafka_event_destroy(event);
-                rdsys::rd_kafka_queue_destroy(queue);
-                return Err(AppError::Kafka("DeleteRecords returned no offsets".into()));
-            }
-
-            let offsets = &*offsets;
-            for i in 0..(offsets.cnt as isize) {
-                let elem = &*offsets.elems.offset(i);
-                if elem.err != rdsys::rd_kafka_resp_err_t::RD_KAFKA_RESP_ERR_NO_ERROR {
-                    let topic_name = if elem.topic.is_null() {
-                        "<unknown>".to_string()
-                    } else {
-                        CStr::from_ptr(elem.topic).to_string_lossy().into_owned()
-                    };
-                    rdsys::rd_kafka_event_destroy(event);
-                    rdsys::rd_kafka_queue_destroy(queue);
-                    return Err(AppError::Kafka(format!(
-                        "DeleteRecords failed for {}[{}]: {:?}",
-                        topic_name, elem.partition, elem.err
-                    )));
-                }
-            }
-
-            rdsys::rd_kafka_event_destroy(event);
-            rdsys::rd_kafka_queue_destroy(queue);
-            Ok(())
+            // Get raw pointer to pass to the FFI module
+            let client_ptr = consumer.client().native_ptr() as usize;
+            super::admin_ffi::delete_records(client_ptr, tpl, 30_000)
         })
         .await
         .map_err(|e| AppError::Kafka(format!("DeleteRecords task failed: {}", e)))?
