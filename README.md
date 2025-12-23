@@ -2,31 +2,53 @@
 
 A terminal user interface for Apache Kafka.
 
-![Rust](https://img.shields.io/badge/rust-1.70%2B-orange)
-![License](https://img.shields.io/badge/license-MIT-blue)
+![Rust](https://img.shields.io/badge/rust-1.83%2B-orange)
+![Edition](https://img.shields.io/badge/edition-2021-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 
 ## Features
 
-- Browse topics, messages, and consumer groups
-- Produce messages to topics
-- Create and delete topics
-- Multiple connection profiles with SASL/SSL support
-- Vim-style navigation (j/k)
+- **Topics**: Browse, create, delete, purge topics
+- **Messages**: View, produce, consume messages in real-time
+- **Consumer Groups**: Monitor groups, members, offsets and lag
+- **Brokers**: View cluster broker information
+- **Partitions**: Add partitions, view partition details
+- **Configuration**: View and modify topic configurations
+- **Multiple Connections**: Save connection profiles with SASL/SSL support
+- **Vim-style Navigation**: j/k, g/G, Ctrl+D/U
+- **Filtering**: Search topics and consumer groups
+- **Logs**: Built-in application log viewer
 
 ## Installation
 
-### From source
+### Prerequisites
+
+- Rust 1.83+
+- CMake
+- OpenSSL development headers
+- libsasl2 (for SASL authentication)
+
+### Ubuntu/Debian
 
 ```bash
-# Prerequisites: Rust 1.70+, CMake, OpenSSL dev headers
+sudo apt install cmake libssl-dev libsasl2-dev pkg-config
+```
 
-# Ubuntu/Debian
-sudo apt install cmake libssl-dev pkg-config
+### Fedora/RHEL
 
-# macOS
+```bash
+sudo dnf install cmake openssl-devel cyrus-sasl-devel
+```
+
+### macOS
+
+```bash
 brew install cmake openssl
+```
 
-# Build
+### Build from source
+
+```bash
 git clone https://github.com/yourname/kafka-tui
 cd kafka-tui
 cargo install --path .
@@ -35,46 +57,46 @@ cargo install --path .
 ## Quick Start
 
 ```bash
-# Run
 kafka-tui
+```
 
-# On Welcome screen:
-# - Press 'n' to create new connection
-# - Enter name and broker address (e.g., localhost:9092)
-# - Press Enter to connect
+On the Welcome screen:
+1. Press `n` to create a new connection
+2. Enter a name and broker address (e.g., `localhost:9092`)
+3. Select authentication type if needed
+4. Press `Enter` to connect
+
+## Screenshots
+
+```
+┌─ Welcome to Kafka TUI ───────────────────────────────────────┐
+│   _  __      __ _           _____ _   _ ___                  │
+│  | |/ /__ _ / _| | ____ _  |_   _| | | |_ _|                 │
+│  | ' // _` | |_| |/ / _` |   | | | | | || |                  │
+│  | . \ (_| |  _|   < (_| |   | | | |_| || |                  │
+│  |_|\_\__,_|_| |_|\_\__,_|   |_|  \___/|___|                 │
+│                                                              │
+│  ┌─ Saved Connections ─────────────────────────────────────┐ │
+│  │  local (localhost:9092)                                 │ │
+│  │  dev-cluster (kafka.dev.example.com:9092)               │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  [Enter] Connect  [n] New connection  [q] Quit               │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ## Connection Profiles
 
-Profiles are saved to `~/.config/kafka-tui/connections.json`.
+Profiles are stored in `~/.local/share/kafka-tui/kafka-tui.db` (SQLite).
 
-### No Authentication
+### Supported Authentication
 
-```
-Name: local
-Brokers: localhost:9092
-Auth: None
-```
-
-### SASL/PLAIN
-
-```
-Name: dev-cluster
-Brokers: kafka.dev.example.com:9092
-Auth: SASL/PLAIN
-Username: user
-Password: secret
-```
-
-### SASL/SCRAM-256 or SCRAM-512
-
-```
-Name: prod-cluster
-Brokers: kafka.prod.example.com:9092
-Auth: SASL/SCRAM-256
-Username: admin
-Password: secret
-```
+| Type | Description |
+|------|-------------|
+| None | No authentication |
+| SASL/PLAIN | Username/password (plaintext) |
+| SASL/SCRAM-256 | SCRAM-SHA-256 authentication |
+| SASL/SCRAM-512 | SCRAM-SHA-512 authentication |
 
 ## Keyboard Shortcuts
 
@@ -90,6 +112,7 @@ Password: secret
 | `1` | Go to Topics |
 | `2` | Go to Consumer Groups |
 | `3` | Go to Brokers |
+| `4` | Go to Logs |
 
 ### Navigation
 
@@ -99,8 +122,8 @@ Password: secret
 | `k` / `↑` | Move up |
 | `g` / `Home` | Go to top |
 | `G` / `End` | Go to bottom |
-| `PageUp` | Page up |
-| `PageDown` | Page down |
+| `Ctrl+D` / `PageDown` | Page down |
+| `Ctrl+U` / `PageUp` | Page up |
 | `Enter` | Select / Confirm |
 
 ### Topics Screen
@@ -108,10 +131,21 @@ Password: secret
 | Key | Action |
 |-----|--------|
 | `Enter` / `m` | View messages |
+| `i` | View topic details |
 | `n` | Create new topic |
+| `d` | Delete topic |
 | `/` | Filter topics |
 | `Ctrl+L` | Clear filter |
 | `Ctrl+R` / `F5` | Refresh |
+
+### Topic Details Screen
+
+| Key | Action |
+|-----|--------|
+| `Tab` | Switch between Partitions/Config tabs |
+| `a` | Add partitions |
+| `e` | Edit configuration |
+| `x` | Purge messages |
 
 ### Messages Screen
 
@@ -119,6 +153,7 @@ Password: secret
 |-----|--------|
 | `v` / `Enter` | Toggle message detail |
 | `p` | Produce message |
+| `c` | Start/stop consuming |
 | `Ctrl+R` / `F5` | Refresh |
 | `Ctrl+L` | Clear messages |
 
@@ -127,9 +162,17 @@ Password: secret
 | Key | Action |
 |-----|--------|
 | `Enter` | View group details |
+| `Tab` | Switch between Members/Offsets tabs |
 | `/` | Filter groups |
 | `Ctrl+L` | Clear filter |
 | `Ctrl+R` / `F5` | Refresh |
+
+### Logs Screen
+
+| Key | Action |
+|-----|--------|
+| `f` | Cycle log level filter |
+| `Ctrl+L` | Clear logs |
 
 ### Welcome Screen
 
@@ -160,7 +203,30 @@ services:
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
 ```
 
-Then connect with: `localhost:9092`, Auth: `None`
+Connect with: `localhost:9092`, Auth: `None`
+
+## Architecture
+
+```
+src/
+├── app/
+│   ├── handlers/     # Domain-specific action handlers
+│   ├── actions.rs    # Action and Command enums
+│   ├── runner.rs     # Main event loop
+│   ├── state.rs      # Application state
+│   ├── update.rs     # State update coordinator
+│   └── validation.rs # Form input validation
+├── events/           # Keyboard event handling
+├── kafka/
+│   ├── client.rs     # Kafka client wrapper
+│   ├── admin_ffi.rs  # Low-level FFI operations
+│   └── config.rs     # Connection configuration
+├── storage/          # SQLite connection storage
+└── ui/
+    ├── screens/      # Screen renderers
+    ├── components/   # Reusable UI components
+    └── theme.rs      # Color theme
+```
 
 ## License
 
