@@ -1,3 +1,4 @@
+mod admin_ffi;
 pub mod client;
 pub mod config;
 
