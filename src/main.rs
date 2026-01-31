@@ -36,14 +36,15 @@ struct Args {
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    // Suppress rdkafka's internal logging to stderr
+    // Set rdkafka log level based on verbosity
     // SAFETY: We set this before any threads are spawned
+    let rdkafka_level = if args.verbose >= 3 { "7" } else if args.verbose >= 2 { "6" } else { "0" };
     unsafe {
-        std::env::set_var("RDKAFKA_LOG_LEVEL", "0");
+        std::env::set_var("RDKAFKA_LOG_LEVEL", rdkafka_level);
     }
 
-    // Setup logging
-    setup_logging(args.verbose)?;
+    // Setup logging — guard must live until app exits
+    let _log_guard = setup_logging(args.verbose)?;
 
     // Setup terminal
     enable_raw_mode()?;
@@ -86,7 +87,7 @@ async fn run_app<B: Backend>(
     Ok(())
 }
 
-fn setup_logging(verbosity: u8) -> anyhow::Result<()> {
+fn setup_logging(verbosity: u8) -> anyhow::Result<tracing_appender::non_blocking::WorkerGuard> {
     let log_level = match verbosity {
         0 => tracing::Level::WARN,
         1 => tracing::Level::INFO,
@@ -103,7 +104,7 @@ fn setup_logging(verbosity: u8) -> anyhow::Result<()> {
     std::fs::create_dir_all(&log_dir)?;
 
     let file_appender = tracing_appender::rolling::daily(&log_dir, "kafka-tui.log");
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
     tracing_subscriber::fmt()
         .with_writer(non_blocking)
@@ -113,5 +114,5 @@ fn setup_logging(verbosity: u8) -> anyhow::Result<()> {
 
     tracing::info!("Kafka TUI starting, log level: {:?}", log_level);
 
-    Ok(())
+    Ok(guard)
 }

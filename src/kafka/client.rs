@@ -37,7 +37,7 @@ impl ClientContext for LoggingContext {
                 tracing::debug!(target: "rdkafka", facility = fac, "{}", msg);
             }
             RDKafkaLogLevel::Debug => {
-                tracing::trace!(target: "rdkafka", facility = fac, "{}", msg);
+                tracing::debug!(target: "rdkafka", facility = fac, "{}", msg);
             }
         }
     }
@@ -130,8 +130,9 @@ impl KafkaClient {
 
     /// Create a temporary consumer for blocking operations.
     fn create_temp_consumer(config: &KafkaConfig) -> AppResult<BaseConsumer<LoggingContext>> {
+        let group_id = config.consumer_group.as_deref().unwrap_or("kafka-tui-temp");
         Self::base_config(config)
-            .set("group.id", "kafka-tui-temp")
+            .set("group.id", group_id)
             .set("enable.auto.commit", "false")
             .create_with_context(LoggingContext)
             .map_err(|e| AppError::Kafka(format!("Temp consumer: {}", e)))
@@ -212,6 +213,7 @@ impl KafkaClient {
         partition: Option<i32>,
         limit: usize,
     ) -> AppResult<Vec<KafkaMessage>> {
+        tracing::debug!(topic, ?offset_mode, ?partition, limit, "Fetching messages");
         let config = self.config.clone();
         let topic = topic.to_string();
 
@@ -237,10 +239,11 @@ impl KafkaClient {
                     OffsetMode::Specific(o) => rdkafka::Offset::Offset(*o),
                     OffsetMode::Timestamp(ts) => rdkafka::Offset::Offset(ts.timestamp_millis()),
                     OffsetMode::Latest => {
-                        let (_, high) = consumer
+                        let (low, high) = consumer
                             .fetch_watermarks(&topic, p, Duration::from_secs(10))
                             .map_err(|e| AppError::Kafka(format!("Watermarks: {}", e)))?;
-                        rdkafka::Offset::Offset((high - limit as i64).max(0))
+                        tracing::debug!(topic, partition = p, low_watermark = low, high_watermark = high, "Watermark fetched");
+                        rdkafka::Offset::Offset((high - limit as i64).max(low))
                     }
                 };
                 tpl.set_partition_offset(&topic, p, offset)
@@ -252,16 +255,28 @@ impl KafkaClient {
 
             let mut messages = Vec::with_capacity(limit);
             let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            let mut consecutive_nones: u32 = 0;
 
             while messages.len() < limit && std::time::Instant::now() < deadline {
                 match consumer.poll(Duration::from_millis(100)) {
-                    Some(Ok(msg)) => messages.push(Self::parse_message(&msg)),
-                    Some(Err(_)) => {}
+                    Some(Ok(msg)) => {
+                        messages.push(Self::parse_message(&msg));
+                        consecutive_nones = 0;
+                    }
+                    Some(Err(e)) => {
+                        tracing::warn!(topic, error = %e, "Poll error");
+                    }
                     None if messages.is_empty() => continue,
-                    None => break,
+                    None => {
+                        consecutive_nones += 1;
+                        if consecutive_nones >= 5 {
+                            break;
+                        }
+                    }
                 }
             }
 
+            tracing::debug!(topic, fetched = messages.len(), "Messages fetched");
             consumer.unassign().ok();
             Ok(messages)
         })
@@ -302,10 +317,12 @@ impl KafkaClient {
             |h, (k, v)| h.insert(rdkafka::message::Header { key: k, value: Some(v.as_bytes()) })
         );
 
-        self.producer
+        let delivery = self.producer
             .send(record.headers(owned_headers), Duration::from_secs(5))
             .await
             .map_err(|(e, _)| AppError::Kafka(format!("Produce failed: {}", e)))?;
+
+        tracing::debug!(topic, partition = delivery.partition, offset = delivery.offset, "Message produced");
         Ok(())
     }
 
